@@ -1,0 +1,1 @@
+export { FaqModal } from './components'

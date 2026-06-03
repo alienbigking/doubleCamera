@@ -1,0 +1,811 @@
+# DiscountExpert - 技术规范文档
+
+## 技术架构
+
+### 核心技术栈
+- **框架**: React Native 0.83+ with TypeScript 5.0+
+- **状态管理**: Zustand 4.4+ (轻量级状态管理)
+- **导航**: React Navigation 6.x (Stack + Tab Navigator)
+- **安全区域**: react-native-safe-area-context 4.x
+- **UI组件**: 原生React Native组件 + 自定义组件库
+- **构建工具**: Metro bundler + TypeScript编译
+
+### 项目技术结构
+```
+src/
+├── pages/                    # 页面模块
+│   ├── home/                # 首页（优惠入口列表，唯一业务页面）
+│   │   ├── components/      # UI组件（home / platformFilter / entryList）
+│   │   ├── stores/          # Zustand状态管理
+│   │   ├── services/        # 服务层（deeplink 跳转）
+│   │   ├── types/           # TypeScript类型定义
+│   │   └── index.ts         # 模块导出
+│   └── login/               # 登录/注册模块（遵循相同结构）
+├── components/              # 共享组件
+│   ├── authRoute/           # 认证守卫组件
+│   ├── appBackground/       # 全局背景色容器
+│   ├── appStatusBar/        # 状态栏组件
+│   └── entryCard/           # 入口卡片组件（核心 UI 组件）
+├── navigation/              # 导航配置（Stack 导航，无 Tab）
+└── utils/                  # 工具函数
+```
+
+### 模块设计规范
+
+#### **标准模块结构**
+每个功能模块必须遵循以下标准结构：
+
+```
+moduleName/
+├── components/          # UI组件层
+│   ├── ComponentA.tsx   # 具体组件
+│   ├── ComponentB.tsx   # 具体组件
+│   └── index.ts        # 组件统一导出
+├── stores/             # 状态管理层
+│   ├── moduleNameStore.ts # Zustand store
+│   └── index.ts        # store导出
+├── services/           # 服务层
+│   ├── moduleNameAPI.ts # API调用
+│   ├── moduleNameStorage.ts # 本地存储
+│   └── index.ts        # 服务统一导出
+├── types/              # 类型定义层
+│   ├── moduleNameTypes.ts # 类型定义
+│   └── index.ts        # 类型导出
+└── index.ts           # 模块主入口
+```
+
+#### **模块导出规范**
+```typescript
+// moduleName/index.ts - 模块主入口
+export * from './components'
+export * from './stores'
+export * from './services'
+export * from './types'
+
+// 默认导出主要组件
+export { default as MainComponent } from './components/MainComponent'
+```
+
+#### **共享组件规范**
+共享组件必须包含完整的模块结构，支持独立使用和测试：
+
+```
+sharedComponent/
+├── components/          # UI组件
+├── stores/             # 内部状态管理（如需要）
+├── services/           # 服务依赖
+├── types/              # 类型定义
+├── hooks/              # 自定义Hooks（如需要）
+└── index.ts           # 组件导出
+```
+
+## 状态管理架构
+
+### Zustand Store设计模式
+```typescript
+// 标准Store结构
+interface StoreState {
+  // State
+  data: any[]
+  loading: boolean
+  error: string | null
+  
+  // Actions
+  fetchData: () => Promise<void>
+  updateData: (data: any) => void
+  clearError: () => void
+}
+
+// Store实现
+const useStore = create<StoreState>((set, get) => ({
+  data: [],
+  loading: false,
+  error: null,
+  
+  fetchData: async () => {
+    set({ loading: true, error: null })
+    try {
+      const response = await api.fetch()
+      set({ data: response, loading: false })
+    } catch (error) {
+      set({ error: error.message, loading: false })
+    }
+  }
+}))
+```
+
+### 状态管理模块
+- **homeStore**: 优惠入口列表、平台筛选、搜索关键词、内置入口数据
+- **authRouteStore**: 用户认证状态、token
+
+## 组件架构设计
+
+### 组件分层模式
+```typescript
+// 容器组件 - 负责状态管理
+const HomeContainer: React.FC = () => {
+  const { state, actions } = useHomeStore()
+  return <HomeComponent state={state} actions={actions} />
+}
+
+// 展示组件 - 负责UI渲染
+interface HomeComponentProps {
+  state: HomeState
+  actions: HomeActions
+}
+const HomeComponent: React.FC<HomeComponentProps> = ({ state, actions }) => {
+  return <View>{/* UI内容 */}</View>
+}
+```
+
+### TypeScript类型系统
+```typescript
+// 严格的类型定义
+type MoodType = 'fine' | 'struggling' | 'bad' | 'undefined'
+
+interface CommunityPost {
+  id: string
+  content: string
+  user: CommunityUser
+  timestamp: Date
+  interactions: InteractionData
+}
+
+interface CommunityUser {
+  id: string
+  username: string
+  avatar?: string
+}
+```
+
+## 导航架构
+
+### 导航层次结构
+```typescript
+// 主导航器（单 Stack，无 Tab）
+AppNavigator (Stack)
+├── Home     - 优惠入口列表（默认首页）
+├── Login    - 登录
+└── Register - 注册
+```
+
+### 导航配置
+- **类型安全**: 完整的导航参数类型定义
+- **深度链接**: 支持URL scheme导航
+- **状态保持**: Tab状态持久化
+
+## UI技术实现
+
+### 安全区域处理
+```typescript
+// 现代化安全区域处理
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+
+const Component = () => {
+  const insets = useSafeAreaInsets()
+  
+  return (
+    <View style={{ paddingTop: insets.top }}>
+      {/* 内容 */}
+    </View>
+  )
+}
+```
+
+### 动画系统
+```typescript
+// React Native Animated API
+import { Animated } from 'react-native'
+
+const AnimatedButton = () => {
+  const scaleAnim = useRef(new Animated.Value(1)).current
+  
+  const handlePressIn = () => {
+    Animated.spring(scaleAnim, {
+      toValue: 0.95,
+      useNativeDriver: true,
+    }).start()
+  }
+  
+  return (
+    <Animated.View style={{ transform: [{ scale: scaleAnim }] }}>
+      <TouchableOpacity onPressIn={handlePressIn}>
+        {/* 按钮内容 */}
+      </TouchableOpacity>
+    </Animated.View>
+  )
+}
+```
+
+### Modal弹框技术
+```typescript
+// 全屏Modal实现
+<Modal
+  visible={isVisible}
+  animationType="slide"
+  presentationStyle="pageSheet"
+  onRequestClose={onClose}
+>
+  <StatusBar barStyle="dark-content" backgroundColor="#fff" />
+  <View style={styles.modalContainer}>
+    {/* Modal内容 */}
+  </View>
+</Modal>
+```
+
+## 数据流架构
+
+### 单向数据流
+```
+用户交互 → Action → Store更新 → 组件重渲染 → UI更新
+```
+
+### 异步数据处理
+```typescript
+// 异步Action模式
+const fetchData = async () => {
+  set({ loading: true })
+  try {
+    const data = await apiCall()
+    set({ data, loading: false, error: null })
+  } catch (error) {
+    set({ error: error.message, loading: false })
+  }
+}
+```
+
+## 性能优化技术
+
+### 组件优化
+- **React.memo**: 防止不必要的重渲染
+- **useMemo/useCallback**: 缓存计算结果和函数
+- **FlatList**: 高性能列表渲染
+
+### 状态优化
+- **状态分片**: 按功能模块分离状态
+- **选择器优化**: 精确的状态订阅
+- **内存管理**: 及时清理状态和监听器
+
+## 构建与部署
+
+### TypeScript配置
+```json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "es2017",
+    "module": "commonjs",
+    "jsx": "react-native",
+    "allowSyntheticDefaultImports": true
+  }
+}
+```
+
+### Metro配置
+```javascript
+// metro.config.js
+module.exports = {
+  transformer: {
+    getTransformOptions: async () => ({
+      transform: {
+        experimentalImportSupport: false,
+        inlineRequires: true,
+      },
+    }),
+  },
+}
+```
+
+## 代码质量标准
+
+### TypeScript规范
+- 严格模式启用
+- 完整的类型覆盖
+- 接口优于类型别名
+- 泛型约束使用
+
+### 项目结构规范
+- **模块化结构**：`components/services/stores/types`
+- **路径别名**：`@/` 映射到 `src`
+- **模块内部引用**：使用相对路径（`../types` 等）
+- **跨模块引用**：使用 `@/` 别名
+
+### 文件与目录命名规范
+- **目录名**：必须小写开头（camelCase），如 `appBackground/`、`authGate/`，禁止大写开头
+- **组件文件名**：必须与目录名一致，小写开头 camelCase，如 `appBackground.tsx`，禁止大写开头（如 `AppBackground.tsx`）
+- **非组件文件**：store、service、types 文件名遵循 `moduleNameStore.ts`、`moduleNameService.ts`、`moduleNameTypes.ts` 格式，首字母小写
+- **index.ts**：每个目录必须有 `index.ts` 作为导出入口，使用显式 import + export（禁止 `export *`）
+
+### 共享组件（src/components/）规范
+每个共享组件必须按以下完整模块结构组织，目录名小写开头：
+
+```
+src/components/
+└── appBackground/           # 目录名小写开头
+    ├── components/
+    │   ├── appBackground.tsx  # 组件文件小写开头
+    │   └── index.ts
+    ├── stores/              # 如有内部状态
+    │   └── index.ts
+    ├── services/            # 如有服务依赖
+    │   └── index.ts
+    ├── types/               # 如有类型定义
+    │   └── index.ts
+    └── index.ts             # 模块主出口
+```
+
+- 现有共享组件：`authRoute/`（认证守卫）、`appBackground/`（背景色容器）、`appStatusBar/`（状态栏）、`entryCard/`（入口卡片）
+- 组件内部引用使用相对路径，跨模块引用使用 `@/components/entryCard`
+
+### 对应后端项目规范（unbounded.social.be）
+
+前端接口调用必须与后端项目规范严格对齐，开发新接口时需同步参考后端 `llms.txt`。
+
+#### 后端模块目录约定
+后端 `apps/discountExpert/` 下每个模块包含：
+```
+{moduleName}/
+├── routes/         # 路由层（kebab-case 文件名，如 feedback-route.js）
+├── services/       # 业务层
+├── models/         # 数据访问层
+├── schemas/        # Mongoose Schema
+└── index.js        # 只导出 Router
+```
+
+#### 后端接口规范要点（前端必须了解）
+- **响应结构**：`{ status, code, data, message }`，`status === 0` 成功，`status !== 0` 业务失败
+- **消息常量**：后端每个模块都有对应消息文件 `@/common/message/response/apps/discountExpert/{module}/{module}.js`，成功和业务错误都通过消息常量返回，禁止硬编码
+- **业务码段**：`code-segments.js` 统一分配，discountExpert 各模块待规划
+- **参数校验失败**：后端抛 `BusinessError`，HTTP 仍为 200，`status` 为对应业务码
+- **系统异常**：HTTP 500，`status: 10099, code: 'common.unknownError'`
+- **接口路径规则**：`/api/discountExpert/{moduleName}`，如 `/api/discountExpert/feedback`
+
+#### 新增后端接口时的检查清单
+每次前端调用新接口，后端必须同步完成：
+1. `schemas/` 定义 Mongoose Schema（时间字段用 Number 毫秒时间戳，明确 `collection`）
+2. `models/` 封装数据访问（只查询/写入，不做业务编排）
+3. `services/` 业务编排，错误用 `throw new BusinessError(moduleMessage.xxx)`
+4. 创建消息常量文件 `@/common/message/response/apps/discountExpert/{module}/{module}.js`
+5. `routes/` 路由层：参数解析 + 鉴权 + 调 service + `res.json({ ...moduleMessage.xxxSuccess, data })`；错误用 `return handleError(res, error, '默认提示')`
+6. 在 `code-segments.js` 分配码段（若新模块）
+7. 在 `apps/discountExpert/index.js` 导出 Router，在 `application/routes.js` 和 `routes/index.js` 注册挂载
+
+### Services 层规范
+- **写法风格**：不使用 `async/await`，直接返回 Promise 链式调用
+  ```typescript
+  // 推荐
+  getPosts(params: IGetPostsParams = {}) {
+    return http
+      .get(`${env.HOST_API_URL}/api/discountExpert/community/posts`, { params })
+      .then(response => response.data)
+  }
+  ```
+- **参数传递**：不在 service 层做解构操作，查询参数在调用方控制
+  ```typescript
+  // 推荐
+  getPosts(params: IGetPostsParams = {}) {
+    return http.get(url, { params }).then(response => response.data)
+  }
+  // 不推荐
+  getPosts(params: IGetPostsParams = {}) {
+    const { page = 1, pageSize = 20 } = params
+    return http.get(url, { params: { page, pageSize } }).then(response => response.data)
+  }
+  ```
+- **导出方式**：使用 `export default { ... }` 对象式 API
+- **URL 拼接**：service 自己拼完整 URL（不在 http 里写 baseURL）
+
+### Types 层规范
+- **职责单一**：types 层**只放类型定义**（type / interface / type literal union 等），**禁止放任何运行时值**（const、配置对象、函数、enum 实例等）
+  - 静态配置对象（如情绪配置、颜色常量、枚举映射表）应放在 `stores/` 中作为 store 的初始 state 字段，由组件通过 `useXxxStore(s => s.xxxConfig)` 读取
+  - 这样既保证类型与数据集中、又避免散落多个 constants 文件
+- **示例**：把 `moodConfig` 写进 `useHomeStore` 的初始 state，而不是单独建一个 `MOOD_CONFIG` 常量
+  ```typescript
+  // ❌ 不推荐：放在 types 中作为运行时常量
+  // types/homeTypes.ts
+  export const MOOD_CONFIG = { fine: { ... }, ... } as const
+
+  // ❌ 不推荐：单独建 constants 文件
+  // stores/moodConfig.ts
+  export const MOOD_CONFIG = { ... }
+
+  // ✅ 推荐：放进 store 的初始 state
+  // types/homeTypes.ts
+  export interface HomeStoreState {
+    moodConfig: Record<MoodType, MoodConfigItem>
+    // ...
+  }
+
+  // stores/homeStore.ts
+  const homeStore = create<HomeStoreState>(set => ({
+    moodConfig: { fine: { ... }, ... },
+    // ...
+  }))
+
+  // 组件中
+  const moodConfig = useHomeStore(s => s.moodConfig)
+  ```
+- **类型命名**：服务参数/返回类型使用 I 前缀命名（如 `ICreatePostParams`）
+- **内联类型**：将 services 中的内联类型提取到 types 文件中
+- **导出方式**：使用显式 import+export（不使用 `export *` / 不使用 `as` 改名导出）
+- **避免别名**：不要做别名（如 `export type A = B` 或 `export const a = b`）
+
+### Store 层规范
+- **状态管理**：使用 Zustand
+- **类型定义**：类型放 types，store 仅实现
+- **实现方式**：使用 `create` 函数创建 store
+- **职责分离**：Store 只负责状态管理，不包含业务逻辑
+  - Store 只提供简单的状态设置方法（如 `setPosts`, `setLoading`, `setError`）
+  - 业务逻辑（API 调用、错误处理、数据转换）应在组件或自定义 hooks 中处理
+  - 组件调用 service，然后通过 store 的状态设置方法更新状态
+- **示例**：
+  ```typescript
+  // Store - 只管理状态
+  const communityStore = create<CommunityState>(set => ({
+    posts: [],
+    loading: false,
+    error: null,
+    setPosts: (posts) => set({ posts }),
+    setLoading: (loading) => set({ loading }),
+    setError: (error) => set({ error }),
+    addPost: (post) => set(state => ({ posts: [post, ...state.posts] })),
+  }))
+
+  // Component - 处理业务逻辑
+  const loadPosts = async () => {
+    setLoading(true)
+    try {
+      const data = await communityService.getPosts()
+      setPosts(data)
+    } catch {
+      setError('加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }
+  ```
+
+### HTTP 配置
+- **统一处理**：`http` 统一处理 timeout/token 注入/全局 HTTP 错误/Toast
+- **Token 控制**：支持 `isDisabledToken` header 控制是否注入 token（用于登录/刷新 token 接口）
+- **文件上传（FormData）**：使用 `FormData` 时**禁止手动设置 `Content-Type`**，让 axios 自动设置带 boundary 的 `multipart/form-data`
+  ```typescript
+  // ✅ 正确：不设置 headers，axios 自动处理
+  uploadImage(formData: FormData) {
+    return http.post(`${env.HOST_API_URL}/file`, formData)
+  }
+
+  // ❌ 错误：手动设置 Content-Type 会导致 boundary 丢失，后端无法解析
+  uploadImage(formData: FormData) {
+    return http.post(url, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },  // 不要这样写！
+    })
+  }
+  ```
+- **HTTP 错误全局处理**：在 `src/utils/http.ts` 的 response 拦截器中统一处理网络与 HTTP 错误，业务层**不再**重复处理：
+  - `401` → 清除登录态、跳转 Login、Toast 提示登录已过期
+  - `400 / 403 / 404 / 405 / 408 / 500 / 501 / 502 / 503 / 504` → Toast 默认文案（优先用后端返回的 `message`）
+  - `Network Error` / `ECONNABORTED` 超时 → Toast 网络/超时提示
+  - 其他状态码 → Toast 兜底文案
+- **业务层 catch 规范**：因 HTTP 错误已全局提示，业务函数中**通常无需写 catch**；只有需要做"业务回滚 / 状态恢复 / 关闭 loading"时才保留 try/finally；如确需 catch，按 [接口调用与错误处理规范](#接口调用与错误处理规范) 仅做 `Toast.info(message)`，禁止再写 `error?.data?.message || error?.message || '默认文案'` 这种兜底拼接，也禁止根据 message 字符串做业务判断
+
+### Android 文件上传特殊处理（⚠️ 重要坑点）
+- **问题现象**：iOS 正常，Android 图片上传报 `Network Error`，请求未到达服务器
+- **根本原因**：Android `file://` URI 无法被 RN 的原生网络层（OkHttp）直接读取
+- **解决方案**：使用 `react-native-blob-util` 包装文件路径
+  ```typescript
+  // ✅ 正确：Android 使用 blob-util 上传
+  import ReactNativeBlobUtil from 'react-native-blob-util'
+  
+  const filePath = img.uri.replace('file://', '')
+  const res = await ReactNativeBlobUtil.fetch(
+    'POST',
+    `${env.HOST_API_URL}/file`,
+    {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'multipart/form-data',
+    },
+    [
+      {
+        name: 'file',
+        filename: img.name,
+        type: img.type,
+        data: ReactNativeBlobUtil.wrap(filePath),  // 关键：wrap 包装路径
+      },
+    ],
+  )
+  ```
+- **统一封装**：项目已提供 `uploadFile` 封装自动处理平台差异
+  ```typescript
+  import { uploadFile } from '@/utils'
+  
+  // 自动处理：iOS 用 axios + FormData，Android 用 blob-util
+  const result = await uploadFile(`${env.HOST_API_URL}/file`, {
+    uri: img.uri,
+    type: img.type,
+    name: img.name,
+  })
+  ```
+- **权限配置**：Android 13+ 使用 `READ_MEDIA_IMAGES`，低版本使用 `READ_EXTERNAL_STORAGE`
+  ```xml
+  <!-- AndroidManifest.xml -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+  <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
+  ```
+
+### Android 启动屏与 NativeStack 路由切换坑点（⚠️ 重要坑点）
+- **问题现象**：应用启动后进入主页，从主页点击进入 `MyPosts`、`Settings` 等 Stack 子页面时，会闪一下启动屏背景
+- **根本原因**：`AuthRoute` 最外层容器（`container`）没有设置 `backgroundColor`，NativeStack 路由切换动画期间新 Screen 尚未完全渲染时，RN 层透明，直接透出底层 Android window 的启动屏背景
+- **解决方案（一行代码）**：给 `AuthRoute` 的 `container` 加白色背景
+  ```typescript
+  // src/components/authRoute/components/authRoute.tsx
+  const styles = StyleSheet.create({
+    container: { flex: 1, backgroundColor: '#fff' },  // ← 关键
+    // ...
+  })
+  ```
+- **与启动屏方案无关**：无论使用 `LaunchTheme`、`react-native-bootsplash` 还是任何其他启动屏方案，只要 RN 层最外层容器没有 `backgroundColor`，都会透出底层 window 背景
+- **无效尝试**：
+  - `MainActivity.onCreate` 里 `window.setBackgroundDrawable(ColorDrawable(Color.WHITE))` —— 能解决问题但会导致启动时多一个白屏，体验差
+  - Stack 的 `contentStyle: { backgroundColor: '#fff' }` —— 只控制 Screen 容器，不覆盖 AuthRoute 层
+  - `NavigationContainer` theme 的 `background: '#fff'` —— 仅供 React Navigation 内部使用，不影响 Android window 层
+- **防闪屏完整配置**：
+  | 位置 | 配置 | 作用 |
+  |------|------|------|
+  | `AuthRoute` container | `backgroundColor: '#fff'` | **核心**，覆盖底层 window 背景 |
+  | `AppNavigator` screenOptions | `contentStyle: { backgroundColor: '#fff' }` | 每个 Screen 都有白色背景 |
+  | `NavigationContainer` theme | `colors.background: '#fff'` | 导航容器背景白色 |
+  | `AndroidManifest.xml` Application | `android:theme="@style/AppTheme"` | Application 级别用白色 AppTheme |
+
+### 环境配置
+- **配置方式**：使用 react-native-config + `.env.*`
+- **统一导出**：对外统一导出 `env` 对象
+
+### 组件规范
+```typescript
+// 标准组件模板
+import React, { useState } from 'react'
+
+interface ComponentProps {
+  // 属性定义
+}
+
+const Component: React.FC<ComponentProps> = ({ ...props }) => {
+  // Hooks使用 - 直接使用导入的 hooks，不要使用 React.useState
+  const [state, setState] = useState('default')
+
+  // 事件处理
+  // 渲染逻辑
+
+  return (
+    <View style={styles.container}>
+      {/* JSX内容 */}
+    </View>
+  )
+}
+
+const styles = StyleSheet.create({
+  container: {
+    // 样式定义
+  },
+})
+
+export default Component
+```
+
+**React Hooks 使用规范**
+- 直接使用导入的 hooks（如 `useState`、`useEffect`），不要使用 `React.useState`、`React.useEffect`
+- 所有 hooks 必须从 React 中显式导入
+```typescript
+// 推荐
+import React, { useState, useEffect } from 'react'
+const [count, setCount] = useState(0)
+
+// 不推荐
+import React from 'react'
+const [count, setCount] = React.useState(0)
+```
+
+### 接口调用与错误处理规范
+
+后端响应统一为 `{ status, code, data, message }` 结构。所有接口调用必须按以下两类情况分别处理：
+
+#### 1. 业务错误（请求成功，但 `status !== 0`）
+解构响应取出 `status / code / data / message`，按 `status` 判断业务结果，使用 `Toast.error(message)` 提示。
+
+```typescript
+const { status, code, data, message } = await communityService.createPost(params)
+if (status === 0) {
+  Toast.success('打卡成功')
+  // 使用 data ...
+} else {
+  // status 非 0（业务错误）
+  Toast.error(message)
+}
+```
+
+**始终直接解构 `{ status, code, data, message }`，不要使用 `res.code` / `res.data` / `res.message` 这种点号访问。**
+
+同一函数中存在多次接口调用时，**优先用块级作用域 `{ ... }`** 隔离作用域，让每次调用都能直接用 `{ status, code, data, message }`，而不是改名（如 `postStatus`、`countMessage`）：
+
+```typescript
+// 推荐：块级作用域隔离
+{
+  const { status, message } = await homeService.checkIn(params)
+  if (status !== 0) { Toast.error(message); return }
+}
+
+{
+  const { status, data, message } = await homeService.getSameMoodCount(params)
+  if (status === 0) {
+    setCount(data?.count || 0)
+  } else {
+    Toast.error(message)
+  }
+}
+
+// 不推荐：使用解构重命名
+const { status: checkStatus, message: checkMessage } = await homeService.checkIn(params)
+const { status: countStatus, data: countData } = await homeService.getSameMoodCount(params)
+```
+
+#### 2. 请求异常（网络错误 / 抛错被 catch）
+catch 中**直接从 error 解构 message**，使用 `Toast.info(message)` 提示。**禁止**使用 `error?.data?.message || error?.message || '默认文案'` 这种链式兜底拼接。
+
+```typescript
+try {
+  // ...
+} catch (error: any) {
+  const { message } = error || {}
+  Toast.info(message)
+}
+```
+
+#### 完整示例
+
+```typescript
+const handleSubmit = async () => {
+  try {
+    const { status, code, data, message } = await someService.someApi(params)
+    if (status !== 0) {
+      Toast.error(message)
+      return
+    }
+    // 业务成功处理 ...
+  } catch (error: any) {
+    const { message } = error || {}
+    Toast.info(message)
+  }
+}
+```
+
+#### 禁止事项
+- ❌ 不使用 `error?.data?.message || error?.message || '默认文案'` 兜底拼接
+- ❌ 不在 catch 中根据 message 字符串内容做业务判断（如 `if (msg.includes('已打卡'))`）
+- ❌ 不使用 `res.code`、`res.data`、`res.message` 形式访问，必须解构
+- ❌ 不在业务错误（status 非 0）时使用 `Toast.info`，应使用 `Toast.error`
+- ❌ 不在 catch 异常中使用 `Toast.error`，应使用 `Toast.info`
+- ❌ 不使用 `code === 200` 判断业务成功，应使用 `status === 0`
+
+## 测试技术
+
+### 单元测试
+- **Jest**: 测试框架
+- **React Native Testing Library**: 组件测试
+- **Mock**: 状态管理模拟
+
+### 集成测试
+- **导航测试**: 页面跳转流程
+- **状态测试**: 数据流验证
+- **UI测试**: 用户交互模拟
+
+## 已知问题与解决方案记录
+
+### 入口卡片跳转方案（WebView + H5 + App 唤起）
+
+#### 背景
+优惠入口点击后需要跳转到京东/淘宝/美团等平台的指定活动页，并尽量在对应 App 内打开。
+
+#### 最终方案
+1. 点击入口卡片 → 导航到 `WebViewScreen`，传入 `url`（H5 页面地址）和 `title`
+2. WebView 打开平台 H5 页面（如京东外卖红包页）
+3. H5 页面自带 JS 检测并弹出「在 App 中打开」提示
+4. 用户点击后触发 App scheme 跳转，`onShouldStartLoadWithRequest` 拦截非 http/https scheme，调用 `Linking.openURL` 唤起对应 App 并跳转到指定页面
+
+#### 关键配置（`src/pages/webView/components/webView.tsx`）
+- `originWhitelist={['*']}` — 让所有 scheme 经过 JS 层拦截，避免被 Android 原生 WebView 丢弃
+- `setSupportMultipleWindows={false}` — 避免新窗口跳出 WebView
+- `injectedJavaScriptBeforeContentLoaded` — 在页面 JS 执行前注入，隐藏 WebView 特征（`window.ReactNativeWebView`、`window.android`、`navigator.userAgent` 末尾的 `(wv)` 标记），让平台 H5 认为是系统浏览器，从而触发唤起弹窗
+- `onShouldStartLoadWithRequest` — 拦截所有非 http/https scheme，调用 `Linking.openURL` 唤起 App
+- `userAgent` — 使用不含 `(wv)` 的标准 Chrome UA
+
+#### 入口数据规范（`src/pages/home/stores/homeStore.ts`）
+- `deeplink` 和 `webFallback` 均使用 H5 页面地址（HTTPS），利用 App Link 机制
+- H5 链接从对应平台 App 内「分享」功能获取，去除 utm_ 等追踪参数后使用
+- 活动页链接有时效性，后续应改为后端动态下发
+
+#### 注意事项
+- 直接用 `openapp.jdmobile://` 等私有 scheme 只能打开 App 首页，无法跳指定页
+- 平台 H5 通过检测 `window.ReactNativeWebView`、UA 中的 `(wv)` 标记判断是否在 WebView 中，检测到后会禁用唤起弹窗
+- 需要在 `AndroidManifest.xml` 的 `<queries>` 中白名单各平台 scheme，否则 Android 11+ `Linking.canOpenURL` 返回 false
+
+---
+
+### HomeBackground 背景组件（Telegram 风格 SVG 背景）
+
+#### 组件位置
+`src/components/homeBackground/components/homeBackground.tsx`
+
+#### 架构设计
+三层叠加结构：
+1. `LinearGradient` 渐变底色（`#CFF5D2 → #A8E6B3 → #7FD89B`）
+2. SVG 图标随机网格层（低透明度 0.10~0.20，`pointerEvents="none"`）
+3. 柔光遮罩层（`rgba(255,255,255,0.18)`）
+
+#### SVG 数据 Pipeline
+- SVG 源文件存放于 `src/assets/svg/animal/`、`src/assets/svg/fruit/`、`src/assets/svg/common/`
+- 执行 `node scripts/generate-svg-data.js` 生成 `src/components/homeBackground/svgData.ts`
+- 脚本会自动：SVGO 压缩（`preset-default` 等插件）→ NaN/undefined/calc 替换为 0 → 转 TS 字符串常量
+- **新增 SVG 后必须重新运行脚本**，热更新即可生效，无需重新打包
+
+#### 关键性能优化（按重要性排序）
+
+1. **懒加载 svgData**：`import * as SvgData` 会在模块加载时同步解析所有字符串（阻塞 JS 线程），改为在 `useEffect → setTimeout(0)` 内 `require('../svgData')`，推迟到导航完成后的空闲时机
+
+2. **SVG 种类控制在 30**：加载后 `.slice(0, 30)`，配合 4 档固定尺寸（`SIZES = [40, 48, 56, 64]`），缓存条目上限 = 30 × 4 = 120，命中率最大化
+
+3. **ReactElement 缓存**：模块级 `svgCache: Map<string, ReactElement>`，key 为 `${size}:${xml}`，相同 SVG+尺寸组合只创建一次 ReactElement（注意：缓存的是 ReactElement 对象，不是底层解析结果，但可减少 JS 开销）
+
+4. **分批渲染**：`svgReady` 后每 16ms（一帧）新增 12 个图标，避免一次性 mount 全部图标卡帧；视觉上图标渐进出现，体验更自然
+
+5. **SVGO 压缩**：生成时自动压缩 SVG，减少路径节点 30%~70%，降低运行时 `SvgXml` 解析成本
+
+#### 网格布局参数
+- `cellSize = 72`：每格 72px，约 6×14 ≈ 84 个图标铺满屏幕
+- 每格随机偏移 ±10px + 随机旋转 0~360°，视觉自然不规则
+- 调整 `cellSize` 控制密度：数值越小越密，越大越稀
+
+#### 不使用 react-native-svg-transformer 的原因
+- Transformer 是编译期方案，需要静态 import 所有 SVG 组件
+- 本方案 SVG 是运行时从字符串池动态选取，无法静态 import
+- `SvgXml` + 懒加载 + 缓存已满足性能要求，不引入额外复杂度
+
+#### 已安装依赖
+- `react-native-linear-gradient`：渐变底色
+- `@shopify/react-native-skia`：已安装备用，暂未用于背景渲染
+- `svgo`（devDependency）：SVG 压缩，仅在脚本中使用
+
+---
+
+### iOS 构建问题（从 littleMemo 项目迁移遗留）
+
+#### 问题现象
+`npm run ios:production:device` 报错：
+- `'/Users/.../ios/littleMemo.xcodeproj' does not exist`
+- `Scheme discountExpert is not currently configured for the build action`
+- `No profiles for 'org.reactjs.native.example.discountExpert'`
+
+#### 根本原因
+项目从 `littleMemo` 迁移而来，多个文件残留旧项目名：
+1. `ios/discountExpert.xcworkspace/contents.xcworkspacedata` — 包含 `group:littleMemo.xcodeproj` 引用
+2. `ios/discountExpert.xcodeproj/xcshareddata/xcschemes/discountExpert.xcscheme` — 所有 target 引用都指向 `littleMemo`
+
+#### 解决方案
+1. **`contents.xcworkspacedata`**：删除 `group:littleMemo.xcodeproj` 的 `<FileRef>` 节点
+2. **`discountExpert.xcscheme`**：将所有 `littleMemo` 引用替换为 `discountExpert`（`BuildableName`、`BlueprintName`、`ReferencedContainer`）
+3. **操作时机**：必须在 Xcode **完全关闭**后修改，否则 Xcode 会在保存时用内存中的旧内容覆盖回去
+4. **签名问题**：Bundle ID 默认为 `org.reactjs.native.example.discountExpert`，需在 Xcode Signing & Capabilities 中开启 Automatic Signing 并选择 Team，或在 pbxproj 中修改 Bundle ID
+
+## 技术债务管理
+
+### 代码审查要点
+- TypeScript类型安全
+- 性能影响评估
+- 可维护性检查
+- 测试覆盖率
+
+### 重构策略
+- 渐进式重构
+- 向后兼容
+- 测试驱动
+- 文档同步
