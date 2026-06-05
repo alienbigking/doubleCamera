@@ -1,0 +1,432 @@
+import React from 'react'
+import {
+  Image,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native'
+
+type CameraSide = 'rear' | 'front'
+
+export type CapturedPhotoPair = Partial<Record<CameraSide, string>> & {
+  combined?: string
+  capturedAt?: string
+}
+
+export type GalleryAsset = {
+  id: string
+  uri: string
+  type: string
+  filename?: string
+}
+
+export const CapturePreview = ({
+  visible,
+  photos,
+  onClose,
+}: {
+  visible: boolean
+  photos: CapturedPhotoPair
+  onClose: () => void
+}) => (
+  <Modal visible={visible} animationType="fade" transparent>
+    <View style={styles.modalBackdrop}>
+      <View style={styles.previewCard}>
+        <Text style={styles.modalTitle}>拍照预览</Text>
+        {photos.capturedAt && (
+          <Text style={styles.captureMeta}>{photos.capturedAt}</Text>
+        )}
+        {photos.combined && (
+          <View style={styles.combinedPreview}>
+            <Image
+              source={{ uri: photos.combined }}
+              style={styles.photoImage}
+            />
+            <Text style={styles.photoLabel}>双摄合照</Text>
+          </View>
+        )}
+        <View style={styles.photoPair}>
+          <PhotoMock label="后置" filePath={photos.rear} />
+          <PhotoMock label="前置" filePath={photos.front} />
+        </View>
+        <View style={styles.modalActions}>
+          <TouchableOpacity style={styles.secondaryAction} onPress={onClose}>
+            <Text style={styles.actionText}>重拍</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.primaryAction} onPress={onClose}>
+            <Text style={styles.actionText}>完成</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </View>
+  </Modal>
+)
+
+export const GalleryModal = ({
+  visible,
+  assets,
+  loading,
+  onClose,
+  onRefresh,
+}: {
+  visible: boolean
+  assets: GalleryAsset[]
+  loading: boolean
+  onClose: () => void
+  onRefresh: () => void
+}) => (
+  <Modal visible={visible} animationType="slide">
+    <SafeAreaView style={styles.galleryRoot}>
+      <View style={styles.modalHeader}>
+        <Text style={styles.modalTitle}>相册</Text>
+        <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
+          <Text style={styles.iconText}>×</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.filterTabs}>
+        {['全部', '双摄照片', '视频'].map(item => (
+          <View key={item} style={styles.filterTab}>
+            <Text style={styles.filterText}>{item}</Text>
+          </View>
+        ))}
+        <TouchableOpacity style={styles.filterTab} onPress={onRefresh}>
+          <Text style={styles.filterText}>刷新</Text>
+        </TouchableOpacity>
+      </View>
+      {loading ? (
+        <View style={styles.emptyGallery}>
+          <Text style={styles.emptyText}>正在读取相册</Text>
+        </View>
+      ) : assets.length === 0 ? (
+        <View style={styles.emptyGallery}>
+          <Text style={styles.emptyText}>暂无照片</Text>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.galleryGrid}>
+          {assets.map(asset => (
+            <View key={asset.id} style={styles.galleryTile}>
+              <Image source={{ uri: asset.uri }} style={styles.galleryImage} />
+              <Text style={styles.dualBadge}>
+                {asset.type.includes('video') ? '视频' : '照片'}
+              </Text>
+            </View>
+          ))}
+        </ScrollView>
+      )}
+    </SafeAreaView>
+  </Modal>
+)
+
+export const SettingsDrawer = ({
+  visible,
+  onClose,
+}: {
+  visible: boolean
+  onClose: () => void
+}) => (
+  <Modal visible={visible} animationType="slide" transparent>
+    <View style={styles.drawerBackdrop}>
+      <View style={styles.drawer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>设置</Text>
+          <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
+            <Text style={styles.iconText}>×</Text>
+          </TouchableOpacity>
+        </View>
+        <ScrollView showsVerticalScrollIndicator={false}>
+          <SettingsSection
+            title="拍摄设置"
+            items={[
+              '网格辅助线 开',
+              '定时拍照 关闭',
+              'HDR 开',
+              '焦段切换提示 开',
+            ]}
+          />
+          <SettingsSection
+            title="视频设置"
+            items={[
+              '分辨率 1080p 30fps',
+              '双视频合成 画中画',
+              '专业模式录制 关',
+            ]}
+          />
+          <SettingsSection
+            title="界面设置"
+            items={['音量键快门 开', '降低透明度省电 关', '显示闪光灯标识 开']}
+          />
+          <SettingsSection
+            title="高级设置"
+            items={['AI场景识别 开', '自动云备份 关', '拍摄数据分析 开']}
+          />
+        </ScrollView>
+      </View>
+    </View>
+  </Modal>
+)
+
+const PhotoMock = ({
+  label,
+  filePath,
+}: {
+  label: string
+  filePath?: string
+}) => (
+  <View style={styles.photoMock}>
+    {filePath ? (
+      <Image source={{ uri: filePath }} style={styles.photoImage} />
+    ) : (
+      <CameraTexture />
+    )}
+    <Text style={styles.photoLabel}>{label}</Text>
+    {filePath && <Text style={styles.photoPath}>{filePath}</Text>}
+  </View>
+)
+
+const SettingsSection = ({
+  title,
+  items,
+}: {
+  title: string
+  items: string[]
+}) => (
+  <View style={styles.settingsSection}>
+    <Text style={styles.sectionTitle}>{title}</Text>
+    {items.map(item => (
+      <View key={item} style={styles.drawerItem}>
+        <Text style={styles.drawerItemText}>{item}</Text>
+        <Text style={styles.menuArrow}>›</Text>
+      </View>
+    ))}
+  </View>
+)
+
+const CameraTexture = ({ compact }: { compact?: boolean }) => (
+  <View style={[styles.texture, compact && styles.textureCompact]}>
+    <View style={styles.neonLine} />
+    <View style={[styles.neonLine, styles.neonLineTwo]} />
+    <View style={styles.lightBand} />
+  </View>
+)
+
+const styles = StyleSheet.create({
+  texture: { ...StyleSheet.absoluteFillObject, backgroundColor: '#06090a' },
+  textureCompact: { borderRadius: 22 },
+  neonLine: {
+    position: 'absolute',
+    top: '18%',
+    left: '8%',
+    width: '88%',
+    height: 2,
+    backgroundColor: 'rgba(92, 255, 219, 0.55)',
+    transform: [{ rotate: '-18deg' }],
+  },
+  neonLineTwo: {
+    top: '34%',
+    left: '28%',
+    width: '62%',
+    backgroundColor: 'rgba(80, 200, 255, 0.4)',
+    transform: [{ rotate: '72deg' }],
+  },
+  lightBand: {
+    position: 'absolute',
+    top: '38%',
+    left: '-10%',
+    width: '120%',
+    height: 18,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+    transform: [{ rotate: '-2deg' }],
+  },
+  modalBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.78)',
+    padding: 18,
+  },
+  previewCard: {
+    borderRadius: 26,
+    padding: 18,
+    backgroundColor: '#111318',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  modalTitle: { color: '#fff', fontSize: 24, fontWeight: '400' },
+  captureMeta: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 8,
+  },
+  combinedPreview: {
+    width: '100%',
+    aspectRatio: 3 / 4,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#080b0c',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    marginTop: 18,
+  },
+  photoPair: { flexDirection: 'row', gap: 12, marginTop: 18 },
+  photoMock: {
+    flex: 1,
+    aspectRatio: 3 / 4,
+    borderRadius: 18,
+    overflow: 'hidden',
+    backgroundColor: '#080b0c',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  photoImage: { width: '100%', height: '100%' },
+  photoLabel: {
+    position: 'absolute',
+    left: 12,
+    bottom: 12,
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  photoPath: {
+    position: 'absolute',
+    left: 10,
+    right: 10,
+    top: 10,
+    overflow: 'hidden',
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 9,
+    fontWeight: '400',
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  modalActions: { flexDirection: 'row', gap: 12, marginTop: 18 },
+  secondaryAction: {
+    flex: 1,
+    paddingVertical: 15,
+    alignItems: 'center',
+    borderRadius: 18,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  primaryAction: {
+    flex: 1,
+    paddingVertical: 15,
+    alignItems: 'center',
+    borderRadius: 18,
+    backgroundColor: 'rgba(0,212,255,0.32)',
+  },
+  actionText: { color: '#fff', fontSize: 16, fontWeight: '400' },
+  galleryRoot: { flex: 1, backgroundColor: '#08090c' },
+  modalHeader: {
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconText: { color: '#fff', fontSize: 22, fontWeight: '400' },
+  closeCircle: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  filterTabs: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 18,
+    marginBottom: 14,
+  },
+  filterTab: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  filterText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  emptyGallery: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyText: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 15,
+    fontWeight: '400',
+  },
+  galleryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    paddingHorizontal: 4,
+    paddingBottom: 24,
+  },
+  galleryTile: {
+    width: '32.6%',
+    aspectRatio: 1,
+    overflow: 'hidden',
+    backgroundColor: '#111',
+    position: 'relative',
+  },
+  galleryImage: { width: '100%', height: '100%' },
+  dualBadge: {
+    position: 'absolute',
+    right: 6,
+    bottom: 6,
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '400',
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.48)',
+  },
+  drawerBackdrop: {
+    flex: 1,
+    alignItems: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+  },
+  drawer: {
+    width: '86%',
+    height: '100%',
+    paddingTop: 36,
+    paddingHorizontal: 12,
+    backgroundColor: '#090b12',
+  },
+  settingsSection: { marginBottom: 24 },
+  sectionTitle: {
+    color: 'rgba(255,255,255,0.42)',
+    fontSize: 12,
+    fontWeight: '400',
+    marginHorizontal: 8,
+    marginBottom: 10,
+  },
+  drawerItem: {
+    minHeight: 54,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    marginBottom: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255,255,255,0.07)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  drawerItemText: { color: '#fff', fontSize: 15, fontWeight: '400' },
+  menuArrow: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 24,
+    fontWeight: '400',
+  },
+})

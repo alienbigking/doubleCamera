@@ -1,30 +1,222 @@
-import React, { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
-  Modal,
+  Animated,
+  Dimensions,
+  PanResponder,
+  PermissionsAndroid,
+  Platform,
   Pressable,
-  SafeAreaView,
-  ScrollView,
   StyleSheet,
   Text,
-  TouchableOpacity,
   View,
 } from 'react-native'
+import { CameraRoll } from '@react-native-camera-roll/camera-roll'
+import {
+  iosRequestAddOnlyGalleryPermission,
+  iosRequestReadWriteGalleryPermission,
+} from '@react-native-camera-roll/camera-roll'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import {
+  CommonResolutions,
+  VisionCamera,
+  type CameraDevice,
+  type CameraController,
+  type CameraPhotoOutput,
+  type CameraPreviewOutput,
+  type CameraSession,
+  type CameraVideoOutput,
+  type Recorder,
+} from 'react-native-vision-camera'
+import {
+  BottomCameraToolbar,
+  ControlStatusToast,
+  ExposureControlPanel,
+  type ExposureRange,
+  type FlashMode,
+  LensPickerPanel,
+  MoreMenuPanel,
+  QuickSettingsPanel,
+  SaveFeedbackToast,
+  TopCameraToolbar,
+  WhiteBalanceControlPanel,
+  whiteBalanceOptions,
+  type CaptureMode,
+  type CaptureTimerMode,
+  type LensOption,
+  type LayoutMode,
+  type Panel,
+  type PhotoSaveMode,
+  type SaveFeedback,
+  type StabilizationMode,
+  type WhiteBalancePreset,
+} from './cameraControls'
+import { GalleryModal, type GalleryAsset, SettingsDrawer } from './overlays'
+import { CameraPane, CameraPreviewSurface } from './cameraPreview'
+import { composeDualPhoto } from './photoComposer'
 
-type CaptureMode = 'photo' | 'video'
-type LayoutMode = 'pip' | 'split'
-type Panel = 'menu' | 'quick' | null
+type CameraSide = 'rear' | 'front'
+type PreviewStatus = 'loading' | 'ready' | 'denied' | 'unavailable' | 'error'
 
-const zooms = ['0.5x', '1x', '2x', '3x']
-const ratios = ['4:3', '16:9', '1:1', '9:16']
+type PreviewOutputs = Partial<Record<CameraSide, CameraPreviewOutput>>
+type PhotoOutputs = Partial<Record<CameraSide, CameraPhotoOutput>>
+type VideoOutputs = Partial<Record<CameraSide, CameraVideoOutput>>
+type Recorders = Partial<Record<CameraSide, Recorder>>
+type CameraPair = Record<CameraSide, CameraDevice>
+type Point = { x: number; y: number }
+type CapturedPhotoFiles = Record<CameraSide, string> & { capturedAt: string }
+type RecordedVideo = { side: CameraSide; filePath: string }
 
-const formatDuration = (seconds: number) => {
-  const minutes = Math.floor(seconds / 60)
-  const remain = seconds % 60
-  return `${String(minutes).padStart(2, '0')}:${String(remain).padStart(
-    2,
-    '0',
-  )}`
+const defaultLensOptions: LensOption[] = [
+  {
+    id: 'wide',
+    label: '主摄(1x)',
+    shortLabel: '主摄',
+    zoomLabel: '1x',
+    zoomValue: 1,
+  },
+]
+const ratios = ['全屏', '4:3', '16:9', '1:1', '9:16']
+const pipSize = { width: 142, height: 184 }
+const pipCornerRadius = 32
+const albumName = 'DualCam'
+const stabilizationPriority: StabilizationMode[] = ['standard', 'cinematic']
+const captureTimerModes: CaptureTimerMode[] = ['off', '3s', '10s']
+const defaultExposureRange: ExposureRange = {
+  min: -1,
+  max: 1,
+  supported: false,
+}
+
+const getCameraStatusText = (status: PreviewStatus, errorText?: string) => {
+  if (status === 'loading') return '正在初始化双摄会话'
+  if (status === 'denied') return '需要开启相机权限'
+  if (status === 'unavailable') return '当前设备不支持前后摄同时预览'
+  if (status === 'error') return errorText || '双摄会话启动失败'
+  return undefined
+}
+
+const findFrontBackCombination = (combinations: CameraDevice[][]) => {
+  for (const combination of combinations) {
+    const front = combination.find(device => device.position === 'front')
+    const rear = combination.find(device => device.position === 'back')
+    if (front && rear) {
+      return { front, rear }
+    }
+  }
+
+  return undefined
+}
+
+const formatZoomLabel = (zoomValue: number) =>
+  Number.isInteger(zoomValue)
+    ? String(zoomValue)
+    : zoomValue.toFixed(1).replace(/\.0$/, '')
+
+const getRearLensOptions = (device: CameraDevice): LensOption[] => {
+  const physicalDevices = device.physicalDevices.length
+    ? device.physicalDevices
+    : [device]
+  const hasUltraWide = physicalDevices.some(
+    physicalDevice => physicalDevice.type === 'ultra-wide-angle',
+  )
+  const hasWide = physicalDevices.some(
+    physicalDevice => physicalDevice.type === 'wide-angle',
+  )
+  const hasTelephoto = physicalDevices.some(
+    physicalDevice => physicalDevice.type === 'telephoto',
+  )
+  const switchFactors = device.zoomLensSwitchFactors
+    .filter(factor => factor > 1)
+    .sort((a, b) => a - b)
+  const telephotoZoom = switchFactors[0] || (device.maxZoom >= 3 ? 3 : 2)
+  const options: LensOption[] = []
+
+  if (hasUltraWide || device.minZoom < 1) {
+    const zoomValue = Math.max(device.minZoom, 0.5)
+    const zoomLabel = formatZoomLabel(zoomValue)
+    options.push({
+      id: 'ultra-wide',
+      label: `超广角(${zoomLabel}x)`,
+      shortLabel: '超广角',
+      zoomLabel: `${zoomLabel}x`,
+      zoomValue,
+    })
+  }
+
+  if (hasWide || options.length === 0) {
+    options.push({
+      id: 'wide',
+      label: '主摄(1x)',
+      shortLabel: '主摄',
+      zoomLabel: '1x',
+      zoomValue: 1,
+    })
+  }
+
+  if (hasTelephoto && device.maxZoom >= telephotoZoom) {
+    const zoomLabel = formatZoomLabel(telephotoZoom)
+    options.push({
+      id: 'telephoto',
+      label: `长焦(${zoomLabel}x)`,
+      shortLabel: '长焦',
+      zoomLabel: `${zoomLabel}x`,
+      zoomValue: telephotoZoom,
+    })
+  }
+
+  return options
+}
+
+const toFileUri = (filePath: string) =>
+  filePath.startsWith('file://') ? filePath : `file://${filePath}`
+
+const isPermissionGranted = (status: string) =>
+  status === 'granted' || status === 'limited'
+
+const wait = (milliseconds: number) =>
+  new Promise<void>(resolve => setTimeout(resolve, milliseconds))
+
+const requestGallerySavePermission = async () => {
+  if (Platform.OS === 'ios') {
+    return isPermissionGranted(await iosRequestAddOnlyGalleryPermission())
+  }
+
+  if (Platform.OS !== 'android') return true
+
+  if (Number(Platform.Version) >= 33) {
+    return true
+  }
+
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
+  )
+  return result === PermissionsAndroid.RESULTS.GRANTED
+}
+
+const requestGalleryReadPermission = async () => {
+  if (Platform.OS === 'ios') {
+    return isPermissionGranted(await iosRequestReadWriteGalleryPermission())
+  }
+
+  if (Platform.OS !== 'android') return true
+
+  if (Number(Platform.Version) >= 33) {
+    const results = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES,
+      PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO,
+    ])
+    return (
+      results[PermissionsAndroid.PERMISSIONS.READ_MEDIA_IMAGES] ===
+        PermissionsAndroid.RESULTS.GRANTED ||
+      results[PermissionsAndroid.PERMISSIONS.READ_MEDIA_VIDEO] ===
+        PermissionsAndroid.RESULTS.GRANTED
+    )
+  }
+
+  const result = await PermissionsAndroid.request(
+    PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
+  )
+  return result === PermissionsAndroid.RESULTS.GRANTED
 }
 
 const DualCamera = () => {
@@ -32,17 +224,290 @@ const DualCamera = () => {
   const [mode, setMode] = useState<CaptureMode>('photo')
   const [layout, setLayout] = useState<LayoutMode>('pip')
   const [panel, setPanel] = useState<Panel>(null)
-  const [zoom, setZoom] = useState('1x')
-  const [ratio, setRatio] = useState('16:9')
+  const [lensOptions, setLensOptions] =
+    useState<LensOption[]>(defaultLensOptions)
+  const [selectedLensId, setSelectedLensId] = useState('wide')
+  const [flashMode, setFlashMode] = useState<FlashMode>('off')
+  const [rearHasFlash, setRearHasFlash] = useState(false)
+  const [rearHasTorch, setRearHasTorch] = useState(false)
+  const [stabilizationMode, setStabilizationMode] =
+    useState<StabilizationMode>('off')
+  const [stabilizationOptions, setStabilizationOptions] = useState<
+    StabilizationMode[]
+  >([])
+  const [ratio, setRatio] = useState('全屏')
   const [primaryCamera, setPrimaryCamera] = useState<'rear' | 'front'>('rear')
   const [showTopBar, setShowTopBar] = useState(true)
   const [showBottomBar, setShowBottomBar] = useState(true)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [galleryOpen, setGalleryOpen] = useState(false)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const [recording, setRecording] = useState(false)
+  const [recordingBusy, setRecordingBusy] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [proMode, setProMode] = useState(false)
+  const [photoSaveMode, setPhotoSaveMode] = useState<PhotoSaveMode>('combined')
+  const [captureTimerMode, setCaptureTimerMode] =
+    useState<CaptureTimerMode>('off')
+  const [focusLocked, setFocusLocked] = useState(false)
+  const [rearExposureBias, setRearExposureBias] = useState(0)
+  const [frontExposureBias, setFrontExposureBias] = useState(0)
+  const [rearWhiteBalancePreset, setRearWhiteBalancePreset] =
+    useState<WhiteBalancePreset>('auto')
+  const [frontWhiteBalancePreset, setFrontWhiteBalancePreset] =
+    useState<WhiteBalancePreset>('auto')
+  const [galleryAssets, setGalleryAssets] = useState<GalleryAsset[]>([])
+  const [galleryLoading, setGalleryLoading] = useState(false)
+  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('loading')
+  const [previewError, setPreviewError] = useState<string>()
+  const [previewOutputs, setPreviewOutputs] = useState<PreviewOutputs>({})
+  const [videoCaptureReady, setVideoCaptureReady] = useState(false)
+  const [captureBusy, setCaptureBusy] = useState(false)
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>(null)
+  const [controlStatusMessage, setControlStatusMessage] = useState<
+    string | null
+  >(null)
+  const [pipPosition, setPipPosition] = useState<Point>(() => {
+    const { width } = Dimensions.get('window')
+    return {
+      x: width - pipSize.width - 18,
+      y: insets.top + 112,
+    }
+  })
+  const cameraSessionRef = useRef<CameraSession | null>(null)
+  const cameraPairRef = useRef<CameraPair | null>(null)
+  const rearCameraControllerRef = useRef<CameraController | null>(null)
+  const frontCameraControllerRef = useRef<CameraController | null>(null)
+  const photoOutputsRef = useRef<PhotoOutputs>({})
+  const previewOutputsRef = useRef<PreviewOutputs>({})
+  const videoOutputsRef = useRef<VideoOutputs>({})
+  const recordersRef = useRef<Recorders>({})
+  const recordingFinishedRef = useRef<Promise<RecordedVideo>[]>([])
+  const captureFlashOpacity = useRef(new Animated.Value(0)).current
+  const shutterScale = useRef(new Animated.Value(1)).current
+  const saveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  const controlStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  )
+  const pipPositionRef = useRef(pipPosition)
+  const pipDragStartRef = useRef(pipPosition)
+
+  useEffect(() => {
+    pipPositionRef.current = pipPosition
+  }, [pipPosition])
+
+  useEffect(
+    () => () => {
+      if (saveFeedbackTimerRef.current) {
+        clearTimeout(saveFeedbackTimerRef.current)
+      }
+      if (controlStatusTimerRef.current) {
+        clearTimeout(controlStatusTimerRef.current)
+      }
+    },
+    [],
+  )
+
+  const clampPipPosition = (point: Point) => {
+    const { width, height } = Dimensions.get('window')
+    return {
+      x: Math.min(Math.max(point.x, 12), width - pipSize.width - 12),
+      y: Math.min(
+        Math.max(point.y, insets.top + 12),
+        height - pipSize.height - insets.bottom - 12,
+      ),
+    }
+  }
+
+  const pipPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onStartShouldSetPanResponderCapture: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 4 || Math.abs(gestureState.dy) > 4,
+      onMoveShouldSetPanResponderCapture: (_, gestureState) =>
+        Math.abs(gestureState.dx) > 2 || Math.abs(gestureState.dy) > 2,
+      onPanResponderGrant: () => {
+        pipDragStartRef.current = pipPositionRef.current
+      },
+      onPanResponderMove: (_, gestureState) => {
+        const current = pipDragStartRef.current
+        setPipPosition(
+          clampPipPosition({
+            x: current.x + gestureState.dx,
+            y: current.y + gestureState.dy,
+          }),
+        )
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        const current = pipDragStartRef.current
+        const nextPosition = clampPipPosition({
+          x: current.x + gestureState.dx,
+          y: current.y + gestureState.dy,
+        })
+        pipPositionRef.current = nextPosition
+        setPipPosition(nextPosition)
+      },
+      onPanResponderTerminate: (_, gestureState) => {
+        const current = pipDragStartRef.current
+        const nextPosition = clampPipPosition({
+          x: current.x + gestureState.dx,
+          y: current.y + gestureState.dy,
+        })
+        pipPositionRef.current = nextPosition
+        setPipPosition(nextPosition)
+      },
+      onShouldBlockNativeResponder: () => true,
+    }),
+  ).current
+
+  useEffect(() => {
+    let cancelled = false
+
+    const startMultiCamPreview = async () => {
+      try {
+        setPreviewStatus('loading')
+        setPreviewError(undefined)
+
+        const hasPermission =
+          VisionCamera.cameraPermissionStatus === 'authorized' ||
+          (await VisionCamera.requestCameraPermission())
+
+        if (!hasPermission) {
+          if (!cancelled) setPreviewStatus('denied')
+          return
+        }
+
+        if (!VisionCamera.supportsMultiCamSessions) {
+          if (!cancelled) setPreviewStatus('unavailable')
+          return
+        }
+
+        const deviceFactory = await VisionCamera.createDeviceFactory()
+        const cameraPair = findFrontBackCombination(
+          deviceFactory.supportedMultiCamDeviceCombinations,
+        )
+
+        if (!cameraPair) {
+          if (!cancelled) setPreviewStatus('unavailable')
+          return
+        }
+
+        const rearPreviewOutput = VisionCamera.createPreviewOutput()
+        const frontPreviewOutput = VisionCamera.createPreviewOutput()
+        const rearPhotoOutput = VisionCamera.createPhotoOutput({
+          targetResolution: CommonResolutions.FHD_4_3,
+          containerFormat: 'jpeg',
+          quality: 0.92,
+          qualityPrioritization: 'balanced',
+        })
+        const frontPhotoOutput = VisionCamera.createPhotoOutput({
+          targetResolution: CommonResolutions.FHD_4_3,
+          containerFormat: 'jpeg',
+          quality: 0.92,
+          qualityPrioritization: 'balanced',
+        })
+        const session = await VisionCamera.createCameraSession(true)
+        const rearLensOptions = getRearLensOptions(cameraPair.rear)
+        const initialLens =
+          rearLensOptions.find(option => option.id === 'wide') ||
+          rearLensOptions[0] ||
+          defaultLensOptions[0]
+        const rearStabilizationOptions = stabilizationPriority.filter(mode =>
+          cameraPair.rear.supportsVideoStabilizationMode(mode),
+        )
+
+        const controllers = await session.configure([
+          {
+            input: cameraPair.rear,
+            outputs: [
+              { output: rearPreviewOutput, mirrorMode: 'off' },
+              { output: rearPhotoOutput, mirrorMode: 'off' },
+            ],
+            constraints: [],
+            initialZoom: initialLens.zoomValue,
+          },
+          {
+            input: cameraPair.front,
+            outputs: [
+              { output: frontPreviewOutput, mirrorMode: 'on' },
+              { output: frontPhotoOutput, mirrorMode: 'off' },
+            ],
+            constraints: [],
+          },
+        ])
+
+        await session.start()
+
+        if (!cancelled) {
+          cameraSessionRef.current = session
+          cameraPairRef.current = {
+            rear: cameraPair.rear,
+            front: cameraPair.front,
+          }
+          previewOutputsRef.current = {
+            rear: rearPreviewOutput,
+            front: frontPreviewOutput,
+          }
+          photoOutputsRef.current = {
+            rear: rearPhotoOutput,
+            front: frontPhotoOutput,
+          }
+          rearCameraControllerRef.current = controllers[0] || null
+          frontCameraControllerRef.current = controllers[1] || null
+          videoOutputsRef.current = {}
+          setVideoCaptureReady(false)
+          setLensOptions(rearLensOptions)
+          setSelectedLensId(initialLens.id)
+          setRearHasFlash(cameraPair.rear.hasFlash)
+          setRearHasTorch(cameraPair.rear.hasTorch)
+          setStabilizationOptions(rearStabilizationOptions)
+          setStabilizationMode('off')
+          setPreviewOutputs({
+            rear: rearPreviewOutput,
+            front: frontPreviewOutput,
+          })
+          setPreviewStatus('ready')
+        }
+      } catch (error) {
+        console.warn('Start multi-cam preview failed', error)
+        if (!cancelled) {
+          setPreviewStatus('error')
+          setPreviewError(
+            error instanceof Error ? error.message : String(error),
+          )
+        }
+      }
+    }
+
+    startMultiCamPreview()
+
+    return () => {
+      cancelled = true
+      setPreviewOutputs({})
+      setVideoCaptureReady(false)
+      setRearHasFlash(false)
+      setRearHasTorch(false)
+      setFlashMode('off')
+      setStabilizationOptions([])
+      setStabilizationMode('off')
+      cameraPairRef.current = null
+      rearCameraControllerRef.current = null
+      frontCameraControllerRef.current = null
+      previewOutputsRef.current = {}
+      photoOutputsRef.current = {}
+      videoOutputsRef.current = {}
+      recordersRef.current = {}
+      recordingFinishedRef.current = []
+
+      const session = cameraSessionRef.current
+      cameraSessionRef.current = null
+      if (session) {
+        session.stop().catch(() => undefined)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!recording) return
@@ -52,143 +517,757 @@ const DualCamera = () => {
     return () => clearInterval(timer)
   }, [recording])
 
-  const secondaryCamera = primaryCamera === 'rear' ? 'front' : 'rear'
+  const secondaryCamera: CameraSide =
+    primaryCamera === 'rear' ? 'front' : 'rear'
   const isPip = layout === 'pip'
   const layoutLabel = layout === 'pip' ? '画中画' : '上下分屏'
   const primaryLabel = primaryCamera === 'rear' ? '后置主画面' : '前置主画面'
   const secondaryLabel = secondaryCamera === 'rear' ? '后置预览' : '前置预览'
+  const previewStatusText = getCameraStatusText(previewStatus, previewError)
+  const selectedLens =
+    lensOptions.find(option => option.id === selectedLensId) ||
+    lensOptions[0] ||
+    defaultLensOptions[0]
 
   const topVisible = showTopBar || panel !== null
   const bottomVisible = showBottomBar || panel !== null
-
-  const captureHint = useMemo(() => {
-    if (recording) return `REC ${formatDuration(recordingSeconds)}`
-    return mode === 'photo' ? '双路拍照待命' : '双路录制待命'
-  }, [mode, recording, recordingSeconds])
 
   const closeFloatingPanels = () => {
     if (panel) setPanel(null)
   }
 
-  const handleShutter = () => {
+  const loadGalleryAssets = async () => {
+    setGalleryLoading(true)
+    try {
+      const hasPermission = await requestGalleryReadPermission()
+      if (!hasPermission) {
+        setGalleryAssets([])
+        return
+      }
+
+      const result = await CameraRoll.getPhotos({
+        first: 60,
+        assetType: 'All',
+        include: ['filename', 'fileSize', 'imageSize', 'playableDuration'],
+      })
+
+      setGalleryAssets(
+        result.edges.map(edge => ({
+          id: edge.node.id,
+          uri: edge.node.image.uri,
+          type: edge.node.type,
+          filename: edge.node.image.filename || undefined,
+        })),
+      )
+    } catch (error) {
+      console.warn('Load camera roll failed', error)
+      setGalleryAssets([])
+    } finally {
+      setGalleryLoading(false)
+    }
+  }
+
+  const openGallery = () => {
+    setGalleryOpen(true)
+    loadGalleryAssets()
+  }
+
+  const selectLens = (option: LensOption) => {
+    setSelectedLensId(option.id)
     setPanel(null)
+    rearCameraControllerRef.current?.setZoom(option.zoomValue).catch(error => {
+      console.warn('Set rear camera zoom failed', error)
+    })
+  }
+
+  const setRearTorchMode = (
+    mode: FlashMode,
+    controller = rearCameraControllerRef.current,
+  ) => {
+    if (!rearHasTorch || !controller) return
+
+    controller.setTorchMode(mode === 'on' ? 'on' : 'off').catch(error => {
+      console.warn('Set rear camera torch failed', error)
+    })
+  }
+
+  const toggleFlashMode = () => {
+    if (!rearHasFlash) return
+
+    const nextFlashMode: FlashMode =
+      flashMode === 'off' ? 'auto' : flashMode === 'auto' ? 'on' : 'off'
+
+    setFlashMode(nextFlashMode)
+    setRearTorchMode(nextFlashMode)
+  }
+
+  const showControlStatusMessage = (message: string) => {
+    if (controlStatusTimerRef.current) {
+      clearTimeout(controlStatusTimerRef.current)
+      controlStatusTimerRef.current = null
+    }
+
+    setControlStatusMessage(message)
+    controlStatusTimerRef.current = setTimeout(() => {
+      setControlStatusMessage(null)
+      controlStatusTimerRef.current = null
+    }, 1000)
+  }
+
+  const toggleStabilizationMode = () => {
     if (mode === 'photo') {
-      setPreviewOpen(true)
+      showControlStatusMessage('防抖仅录像生效')
       return
     }
-    setRecording(value => {
-      if (value) {
-        setRecordingSeconds(0)
+
+    if (stabilizationOptions.length === 0) return
+
+    const availableModes: StabilizationMode[] = ['off', ...stabilizationOptions]
+    const currentIndex = availableModes.indexOf(stabilizationMode)
+    const nextMode =
+      availableModes[(currentIndex + 1) % availableModes.length] || 'off'
+
+    setStabilizationMode(nextMode)
+    setVideoCaptureReady(false)
+    showControlStatusMessage(
+      nextMode === 'off'
+        ? '防抖已关闭'
+        : nextMode === 'standard'
+        ? '防抖：标准'
+        : '防抖：影院',
+    )
+  }
+
+  const toggleCaptureTimer = () => {
+    const currentIndex = captureTimerModes.indexOf(captureTimerMode)
+    const nextMode =
+      captureTimerModes[(currentIndex + 1) % captureTimerModes.length] || 'off'
+
+    setCaptureTimerMode(nextMode)
+  }
+
+  const toggleFocusLock = async () => {
+    const controller = rearCameraControllerRef.current
+    if (!controller?.device.supportsFocusLocking) {
+      showControlStatusMessage('当前设备不支持锁焦')
+      return
+    }
+
+    try {
+      if (focusLocked) {
+        await controller.resetFocus()
+        setFocusLocked(false)
+        setRearWhiteBalancePreset('auto')
+      } else {
+        await controller.lockCurrentFocus()
+        setFocusLocked(true)
       }
-      return !value
+    } catch (error) {
+      console.warn('Toggle focus lock failed', error)
+      showControlStatusMessage('对焦锁定失败')
+    }
+  }
+
+  const getExposureRange = (
+    controller: CameraController | null,
+  ): ExposureRange => {
+    if (!controller?.device.supportsExposureBias) return defaultExposureRange
+
+    return {
+      min: controller.device.minExposureBias,
+      max: controller.device.maxExposureBias,
+      supported: true,
+    }
+  }
+
+  const applyExposureBias = async (
+    side: CameraSide,
+    value: number,
+    controller = side === 'rear'
+      ? rearCameraControllerRef.current
+      : frontCameraControllerRef.current,
+  ) => {
+    if (!controller?.device.supportsExposureBias) {
+      showControlStatusMessage('当前设备不支持曝光补偿')
+      return
+    }
+
+    const nextBias = Math.min(
+      Math.max(value, controller.device.minExposureBias),
+      controller.device.maxExposureBias,
+    )
+
+    if (side === 'rear') {
+      setRearExposureBias(nextBias)
+    } else {
+      setFrontExposureBias(nextBias)
+    }
+
+    try {
+      await controller.setExposureBias(nextBias)
+    } catch (error) {
+      console.warn('Set exposure bias failed', error)
+      showControlStatusMessage('曝光设置失败')
+    }
+  }
+
+  const resetExposureBias = (side: CameraSide) => {
+    applyExposureBias(side, 0)
+  }
+
+  const applyWhiteBalancePreset = async (
+    side: CameraSide,
+    preset: WhiteBalancePreset,
+    controller = side === 'rear'
+      ? rearCameraControllerRef.current
+      : frontCameraControllerRef.current,
+  ) => {
+    if (!controller?.device.supportsWhiteBalanceLocking) {
+      showControlStatusMessage('当前设备不支持白平衡锁定')
+      return
+    }
+
+    try {
+      if (preset === 'auto') {
+        await controller.resetFocus()
+        if (side === 'rear') setFocusLocked(false)
+      } else {
+        const option = whiteBalanceOptions.find(item => item.id === preset)
+        if (!option?.temperature) return
+
+        const gains = controller.convertWhiteBalanceTemperatureAndTintValues({
+          temperature: option.temperature,
+          tint: option.tint || 0,
+        })
+        await controller.setWhiteBalanceLocked(gains)
+      }
+
+      if (side === 'rear') {
+        setRearWhiteBalancePreset(preset)
+      } else {
+        setFrontWhiteBalancePreset(preset)
+      }
+    } catch (error) {
+      console.warn('Set white balance failed', error)
+      showControlStatusMessage('白平衡设置失败')
+    }
+  }
+
+  const runCaptureCountdown = async () => {
+    if (captureTimerMode === 'off') return
+
+    const seconds = Number(captureTimerMode.replace('s', ''))
+    for (let remaining = seconds; remaining > 0; remaining -= 1) {
+      showControlStatusMessage(String(remaining))
+      await wait(1000)
+    }
+  }
+
+  const runCaptureAnimation = () => {
+    captureFlashOpacity.setValue(0)
+    shutterScale.setValue(1)
+    Animated.parallel([
+      Animated.sequence([
+        Animated.timing(captureFlashOpacity, {
+          toValue: 0.62,
+          duration: 70,
+          useNativeDriver: true,
+        }),
+        Animated.timing(captureFlashOpacity, {
+          toValue: 0,
+          duration: 210,
+          useNativeDriver: true,
+        }),
+      ]),
+      Animated.sequence([
+        Animated.timing(shutterScale, {
+          toValue: 0.84,
+          duration: 80,
+          useNativeDriver: true,
+        }),
+        Animated.spring(shutterScale, {
+          toValue: 1,
+          damping: 10,
+          stiffness: 210,
+          mass: 0.55,
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start()
+  }
+
+  const showSaveFeedback = (feedback: SaveFeedback) => {
+    if (saveFeedbackTimerRef.current) {
+      clearTimeout(saveFeedbackTimerRef.current)
+      saveFeedbackTimerRef.current = null
+    }
+
+    setSaveFeedback(feedback)
+
+    if (feedback === 'saved') {
+      saveFeedbackTimerRef.current = setTimeout(() => {
+        setSaveFeedback(null)
+        saveFeedbackTimerRef.current = null
+      }, 900)
+    }
+  }
+
+  const prependGalleryAssets = (
+    assets: Awaited<ReturnType<typeof CameraRoll.saveAsset>>[],
+  ) => {
+    setGalleryAssets(previous => [
+      ...assets.map(asset => ({
+        id: asset.node.id,
+        uri: asset.node.image.uri,
+        type: asset.node.type,
+        filename: asset.node.image.filename || undefined,
+      })),
+      ...previous,
+    ])
+  }
+
+  const saveSeparatePhotoAssets = async (photos: CapturedPhotoFiles) =>
+    Promise.all([
+      CameraRoll.saveAsset(photos.rear, {
+        type: 'photo',
+        album: albumName,
+      }),
+      CameraRoll.saveAsset(photos.front, {
+        type: 'photo',
+        album: albumName,
+      }),
+    ])
+
+  const saveCombinedPhotoAsset = async (photos: CapturedPhotoFiles) => {
+    const { width, height } = Dimensions.get('window')
+    const combinedPhotoUri = await composeDualPhoto({
+      photos,
+      layout,
+      primaryCamera,
+      pipPosition,
+      pipSize,
+      previewSize: { width, height },
     })
+    return CameraRoll.saveAsset(combinedPhotoUri, {
+      type: 'photo',
+      album: albumName,
+    })
+  }
+
+  const saveSeparatePhotos = async (photos: CapturedPhotoFiles) => {
+    const hasSavePermission = await requestGallerySavePermission()
+    if (!hasSavePermission) {
+      console.warn('No permission to save photos')
+      return
+    }
+
+    const assets = await saveSeparatePhotoAssets(photos)
+    prependGalleryAssets(assets)
+  }
+
+  const saveCombinedPhoto = async (photos: CapturedPhotoFiles) => {
+    const hasSavePermission = await requestGallerySavePermission()
+    if (!hasSavePermission) {
+      console.warn('No permission to save combined photo')
+      return
+    }
+
+    const asset = await saveCombinedPhotoAsset(photos)
+    prependGalleryAssets([asset])
+  }
+
+  const saveCombinedAndSeparatePhotos = async (photos: CapturedPhotoFiles) => {
+    const hasSavePermission = await requestGallerySavePermission()
+    if (!hasSavePermission) {
+      console.warn('No permission to save combined and separate photos')
+      return
+    }
+
+    const combinedAsset = await saveCombinedPhotoAsset(photos)
+    const separateAssets = await saveSeparatePhotoAssets(photos)
+    prependGalleryAssets([combinedAsset, ...separateAssets])
+  }
+
+  const capturePhotos = async () => {
+    if (captureBusy) return
+
+    const rearPhotoOutput = photoOutputsRef.current.rear
+    const frontPhotoOutput = photoOutputsRef.current.front
+    if (previewStatus !== 'ready' || !rearPhotoOutput || !frontPhotoOutput) {
+      return
+    }
+
+    try {
+      runCaptureAnimation()
+      showSaveFeedback('saving')
+      setCaptureBusy(true)
+      const rearPhoto = await rearPhotoOutput.capturePhotoToFile(
+        {
+          flashMode: rearHasFlash ? flashMode : 'off',
+          enableShutterSound: true,
+        },
+        {},
+      )
+      const frontPhoto = await frontPhotoOutput.capturePhotoToFile(
+        {
+          flashMode: 'off',
+          enableShutterSound: false,
+        },
+        {},
+      )
+
+      const photos: CapturedPhotoFiles = {
+        rear: toFileUri(rearPhoto.filePath),
+        front: toFileUri(frontPhoto.filePath),
+        capturedAt: new Date().toLocaleString(),
+      }
+
+      setCaptureBusy(false)
+
+      if (photoSaveMode === 'combined') {
+        await saveCombinedPhoto(photos)
+      } else if (photoSaveMode === 'separate') {
+        await saveSeparatePhotos(photos)
+      } else {
+        await saveCombinedAndSeparatePhotos(photos)
+      }
+      showSaveFeedback('saved')
+    } catch (error) {
+      console.warn('Dual camera capture failed', error)
+      showSaveFeedback(null)
+      setCaptureBusy(false)
+    }
+  }
+
+  const configureVideoSession = async () => {
+    if (videoCaptureReady) return true
+
+    const session = cameraSessionRef.current
+    const cameraPair = cameraPairRef.current
+    const rearPreviewOutput = previewOutputsRef.current.rear
+    const frontPreviewOutput = previewOutputsRef.current.front
+    const rearPhotoOutput = photoOutputsRef.current.rear
+    const frontPhotoOutput = photoOutputsRef.current.front
+
+    if (
+      !session ||
+      !cameraPair ||
+      !rearPreviewOutput ||
+      !frontPreviewOutput ||
+      !rearPhotoOutput ||
+      !frontPhotoOutput
+    ) {
+      return false
+    }
+
+    try {
+      const rearVideoOutput = VisionCamera.createVideoOutput({
+        targetResolution: CommonResolutions.HD_16_9,
+        enableAudio: false,
+        fileType: 'mp4',
+      })
+      const frontVideoOutput = VisionCamera.createVideoOutput({
+        targetResolution: CommonResolutions.HD_16_9,
+        enableAudio: false,
+        fileType: 'mp4',
+      })
+      const selectedLens =
+        lensOptions.find(option => option.id === selectedLensId) ||
+        defaultLensOptions[0]
+      const rearConstraints =
+        stabilizationMode !== 'off' &&
+        cameraPair.rear.supportsVideoStabilizationMode(stabilizationMode)
+          ? [{ videoStabilizationMode: stabilizationMode }]
+          : []
+      const frontConstraints =
+        stabilizationMode !== 'off' &&
+        cameraPair.front.supportsVideoStabilizationMode(stabilizationMode)
+          ? [{ videoStabilizationMode: stabilizationMode }]
+          : []
+
+      const controllers = await session.configure([
+        {
+          input: cameraPair.rear,
+          outputs: [
+            { output: rearPreviewOutput, mirrorMode: 'off' },
+            { output: rearPhotoOutput, mirrorMode: 'off' },
+            { output: rearVideoOutput, mirrorMode: 'off' },
+          ],
+          constraints: rearConstraints,
+          initialZoom: selectedLens.zoomValue,
+        },
+        {
+          input: cameraPair.front,
+          outputs: [
+            { output: frontPreviewOutput, mirrorMode: 'on' },
+            { output: frontPhotoOutput, mirrorMode: 'off' },
+            { output: frontVideoOutput, mirrorMode: 'off' },
+          ],
+          constraints: frontConstraints,
+        },
+      ])
+
+      videoOutputsRef.current = {
+        rear: rearVideoOutput,
+        front: frontVideoOutput,
+      }
+      rearCameraControllerRef.current = controllers[0] || null
+      frontCameraControllerRef.current = controllers[1] || null
+      setRearTorchMode(flashMode, controllers[0] || null)
+      if (rearExposureBias !== 0) {
+        await applyExposureBias(
+          'rear',
+          rearExposureBias,
+          controllers[0] || null,
+        )
+      }
+      if (frontExposureBias !== 0) {
+        await applyExposureBias(
+          'front',
+          frontExposureBias,
+          controllers[1] || null,
+        )
+      }
+      if (rearWhiteBalancePreset !== 'auto') {
+        await applyWhiteBalancePreset(
+          'rear',
+          rearWhiteBalancePreset,
+          controllers[0] || null,
+        )
+      }
+      if (frontWhiteBalancePreset !== 'auto') {
+        await applyWhiteBalancePreset(
+          'front',
+          frontWhiteBalancePreset,
+          controllers[1] || null,
+        )
+      }
+      setVideoCaptureReady(true)
+      return true
+    } catch (error) {
+      console.warn('Configure dual video session failed', error)
+      videoOutputsRef.current = {}
+      setVideoCaptureReady(false)
+      if (stabilizationMode !== 'off') {
+        setStabilizationMode('off')
+      }
+      return false
+    }
+  }
+
+  const startVideoRecording = async () => {
+    if (recording || recordingBusy) return
+
+    const configured = await configureVideoSession()
+    if (!configured) {
+      console.warn('Dual video recording is not available on this device')
+      return
+    }
+
+    const rearVideoOutput = videoOutputsRef.current.rear
+    const frontVideoOutput = videoOutputsRef.current.front
+    if (
+      previewStatus !== 'ready' ||
+      !videoCaptureReady ||
+      !rearVideoOutput ||
+      !frontVideoOutput
+    ) {
+      console.warn('Dual video recording is not available on this session')
+      return
+    }
+
+    try {
+      setRecordingBusy(true)
+      const rearRecorder = await rearVideoOutput.createRecorder({})
+      const frontRecorder = await frontVideoOutput.createRecorder({})
+
+      const makeRecording = (side: CameraSide, recorder: Recorder) => {
+        let startRecording: Promise<void>
+        const finishPromise = new Promise<RecordedVideo>((resolve, reject) => {
+          startRecording = recorder.startRecording(
+            filePath => resolve({ side, filePath }),
+            error => reject(error),
+          )
+        })
+        return { finishPromise, startRecording: startRecording! }
+      }
+
+      const rearRecording = makeRecording('rear', rearRecorder)
+      const frontRecording = makeRecording('front', frontRecorder)
+
+      recordersRef.current = {
+        rear: rearRecorder,
+        front: frontRecorder,
+      }
+      recordingFinishedRef.current = [
+        rearRecording.finishPromise,
+        frontRecording.finishPromise,
+      ]
+      await Promise.all([
+        rearRecording.startRecording,
+        frontRecording.startRecording,
+      ])
+      setRecordingSeconds(0)
+      setRecording(true)
+    } catch (error) {
+      console.warn('Start dual video recording failed', error)
+      recordersRef.current = {}
+      recordingFinishedRef.current = []
+    } finally {
+      setRecordingBusy(false)
+    }
+  }
+
+  const stopVideoRecording = async () => {
+    if (!recording || recordingBusy) return
+
+    const recorders = recordersRef.current
+    const finishPromises = recordingFinishedRef.current
+    try {
+      setRecordingBusy(true)
+      await Promise.all(
+        [recorders.rear, recorders.front].map(recorder =>
+          recorder?.stopRecording().catch(error => {
+            console.warn('Stop recorder failed', error)
+          }),
+        ),
+      )
+      setRecording(false)
+      setRecordingSeconds(0)
+
+      const videos = await Promise.all(finishPromises)
+      const hasSavePermission = await requestGallerySavePermission()
+      if (!hasSavePermission) {
+        console.warn('No permission to save videos')
+        return
+      }
+
+      const assets = await Promise.all(
+        videos.map(video =>
+          CameraRoll.saveAsset(toFileUri(video.filePath), {
+            type: 'video',
+            album: albumName,
+          }),
+        ),
+      )
+      prependGalleryAssets(assets)
+    } catch (error) {
+      console.warn('Stop dual video recording failed', error)
+    } finally {
+      recordersRef.current = {}
+      recordingFinishedRef.current = []
+      setRecording(false)
+      setRecordingSeconds(0)
+      setRecordingBusy(false)
+    }
+  }
+
+  const handleShutter = async () => {
+    if (captureBusy || recordingBusy) return
+
+    setPanel(null)
+    if (mode === 'photo') {
+      await runCaptureCountdown()
+      await capturePhotos()
+      return
+    }
+    if (recording) {
+      await stopVideoRecording()
+    } else {
+      await runCaptureCountdown()
+      await startVideoRecording()
+    }
   }
 
   const openMenuItem = (action: 'gallery' | 'settings' | 'pro') => {
     setPanel(null)
-    if (action === 'gallery') setGalleryOpen(true)
+    if (action === 'gallery') openGallery()
     if (action === 'settings') setSettingsOpen(true)
     if (action === 'pro') setProMode(value => !value)
   }
+
+  const rearExposureRange = getExposureRange(rearCameraControllerRef.current)
+  const frontExposureRange = getExposureRange(frontCameraControllerRef.current)
 
   return (
     <View style={styles.root}>
       <Pressable style={styles.preview} onPress={closeFloatingPanels}>
         {layout === 'split' ? (
           <>
-            <CameraPane label={primaryLabel} />
+            <CameraPane
+              label={primaryLabel}
+              previewOutput={previewOutputs[primaryCamera]}
+              statusText={previewStatusText}
+              ratio={ratio}
+              focusLocked={focusLocked}
+              onUnlockFocus={toggleFocusLock}
+            />
             <View style={styles.splitDivider} />
-            <CameraPane label={secondaryLabel} secondary />
+            <CameraPane
+              label={secondaryLabel}
+              previewOutput={previewOutputs[secondaryCamera]}
+              statusText={previewStatusText}
+              ratio={ratio}
+              secondary
+            />
           </>
         ) : (
-          <CameraPane label={primaryLabel} full />
+          <CameraPane
+            label={primaryLabel}
+            previewOutput={previewOutputs[primaryCamera]}
+            statusText={previewStatusText}
+            ratio={ratio}
+            focusLocked={focusLocked}
+            onUnlockFocus={toggleFocusLock}
+            full
+          />
         )}
 
         {isPip && (
-          <View style={[styles.pip, { top: insets.top + 58 }]}>
-            <CameraTexture compact />
-            <Text style={styles.pipLabel}>{secondaryLabel}</Text>
-            <View style={styles.pipToolbar}>
-              <Text style={styles.pipTool}>⌁</Text>
-              <Text style={styles.pipTool}>跑</Text>
-              <Text style={styles.pipTool}>⋯</Text>
+          <View
+            style={[
+              styles.pip,
+              {
+                left: pipPosition.x,
+                top: pipPosition.y,
+              },
+            ]}
+            {...pipPanResponder.panHandlers}
+          >
+            <View style={styles.pipInner}>
+              <CameraPreviewSurface
+                previewOutput={previewOutputs[secondaryCamera]}
+                compact
+                style={styles.pipPreviewSurface}
+              />
+              <Text style={styles.pipLabel}>{secondaryLabel}</Text>
             </View>
           </View>
         )}
 
-        <View style={[styles.captureState, { top: insets.top + 8 }]}>
-          <View style={[styles.statePill, styles.activeState]}>
-            <View style={styles.stateDot} />
-            <Text style={styles.stateText}>闪光</Text>
-          </View>
-          <View style={[styles.statePill, styles.activeState]}>
-            <View style={styles.stateDot} />
-            <Text style={styles.stateText}>防抖</Text>
-          </View>
-          <Text style={[styles.stateText, recording && styles.recordingText]}>
-            {captureHint}
-          </Text>
-        </View>
-
         {topVisible && (
-          <View style={[styles.topTools, { top: insets.top + 36 }]}>
-            <TouchableOpacity
-              style={styles.glassCircle}
-              activeOpacity={0.8}
-              onPress={() =>
-                setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
-              }
-            >
-              <Text style={styles.iconText}>⇄</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.lensPill}
-              activeOpacity={0.8}
-              onPress={() =>
-                setZoom(
-                  current => zooms[(zooms.indexOf(current) + 1) % zooms.length],
-                )
-              }
-            >
-              <Text style={styles.lensText}>
-                {zoom === '0.5x' ? '超广角' : zoom === '1x' ? '广角' : '长焦'} (
-                {zoom})
-              </Text>
-              <Text style={styles.chevron}>⌄</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.glassCircle}
-              activeOpacity={0.8}
-              onPress={() => setPanel(panel === 'menu' ? null : 'menu')}
-            >
-              <Text style={styles.iconText}>⋯</Text>
-            </TouchableOpacity>
-          </View>
+          <TopCameraToolbar
+            top={insets.top + 14}
+            selectedLens={selectedLens}
+            flashMode={flashMode}
+            flashAvailable={rearHasFlash}
+            captureMode={mode}
+            stabilizationMode={stabilizationMode}
+            stabilizationAvailable={stabilizationOptions.length > 0}
+            onToggleLensPanel={() => setPanel(panel === 'zoom' ? null : 'zoom')}
+            onToggleFlashMode={toggleFlashMode}
+            onToggleStabilizationMode={toggleStabilizationMode}
+            onToggleMenu={() => setPanel(panel === 'menu' ? null : 'menu')}
+          />
         )}
 
-        {topVisible && (
-          <View style={[styles.zoomBar, { top: insets.top + 88 }]}>
-            {zooms.map(item => (
-              <TouchableOpacity
-                key={item}
-                style={[
-                  styles.zoomItem,
-                  zoom === item && styles.zoomItemActive,
-                ]}
-                onPress={() => setZoom(item)}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={[
-                    styles.zoomText,
-                    zoom === item && styles.zoomTextActive,
-                  ]}
-                >
-                  {item}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
+        {panel === 'zoom' && (
+          <LensPickerPanel
+            top={insets.top + 68}
+            lensOptions={lensOptions}
+            selectedLensId={selectedLensId}
+            onSelectLens={selectLens}
+          />
         )}
 
         {proMode && (
@@ -202,159 +1281,128 @@ const DualCamera = () => {
         )}
 
         {bottomVisible && (
-          <SafeAreaView style={styles.bottomSafe}>
-            <View style={styles.bottomArea}>
-              <View style={styles.modeTabs}>
-                <ModeButton
-                  active={mode === 'photo'}
-                  label="拍照"
-                  onPress={() => setMode('photo')}
-                />
-                <ModeButton
-                  active={mode === 'video'}
-                  label="视频"
-                  onPress={() => setMode('video')}
-                />
-              </View>
-              <View style={styles.controlRow}>
-                <TouchableOpacity
-                  style={styles.controlChip}
-                  activeOpacity={0.8}
-                  onPress={() =>
-                    setLayout(value => (value === 'pip' ? 'split' : 'pip'))
-                  }
-                >
-                  <Text style={styles.chipIcon}>▣</Text>
-                  <Text style={styles.chipText}>{layoutLabel}</Text>
-                </TouchableOpacity>
-                {recording && (
-                  <Text style={styles.timer}>
-                    {formatDuration(recordingSeconds)}
-                  </Text>
-                )}
-              </View>
-              <View style={styles.shutterRow}>
-                <TouchableOpacity
-                  style={styles.sideButton}
-                  activeOpacity={0.8}
-                  onPress={() => setGalleryOpen(true)}
-                >
-                  <Text style={styles.iconText}>▧</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.sideButton}
-                  activeOpacity={0.8}
-                  onPress={() =>
-                    setPrimaryCamera(value =>
-                      value === 'rear' ? 'front' : 'rear',
-                    )
-                  }
-                >
-                  <Text style={styles.iconText}>⇄</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.shutterOuter}
-                  activeOpacity={0.85}
-                  onPress={handleShutter}
-                >
-                  <View
-                    style={[
-                      styles.shutterInner,
-                      recording && styles.shutterRecording,
-                    ]}
-                  />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.sideButton}
-                  activeOpacity={0.8}
-                  onPress={() => setMode('video')}
-                >
-                  <Text style={styles.iconText}>▮▶</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.sideButton}
-                  activeOpacity={0.8}
-                  onPress={() => setPanel(panel === 'quick' ? null : 'quick')}
-                >
-                  <Text style={styles.iconText}>⋯</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </SafeAreaView>
+          <BottomCameraToolbar
+            mode={mode}
+            layoutLabel={layoutLabel}
+            recording={recording}
+            recordingSeconds={recordingSeconds}
+            captureBusy={captureBusy}
+            recordingBusy={recordingBusy}
+            shutterScale={shutterScale}
+            onSetPhotoMode={() => {
+              if (recording) {
+                stopVideoRecording()
+              }
+              setMode('photo')
+            }}
+            onSetVideoMode={() => setMode('video')}
+            onToggleLayout={() =>
+              setLayout(value => (value === 'pip' ? 'split' : 'pip'))
+            }
+            onOpenGallery={openGallery}
+            onFlipPrimaryCamera={() =>
+              setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
+            }
+            onPressShutter={handleShutter}
+            onToggleQuickPanel={() =>
+              setPanel(panel === 'quick' ? null : 'quick')
+            }
+          />
         )}
 
         {panel === 'menu' && (
-          <GlassPanel style={[styles.menuPanel, { top: insets.top + 82 }]}>
-            <MenuItem
-              icon="▧"
-              label="相册"
-              onPress={() => openMenuItem('gallery')}
-            />
-            <MenuItem
-              icon="⚙"
-              label="设置"
-              onPress={() => openMenuItem('settings')}
-            />
-            <MenuItem icon="◐" label="滤镜库" />
-            <MenuItem
-              icon="▤"
-              label={proMode ? '退出专业模式' : '专业模式'}
-              onPress={() => openMenuItem('pro')}
-            />
-            <MenuItem icon="✦" label="AI增强" />
-            <ToggleRow
-              label="显示顶部工具栏"
-              value={showTopBar}
-              onValueChange={setShowTopBar}
-            />
-            <ToggleRow
-              label="显示底部工具栏"
-              value={showBottomBar}
-              onValueChange={setShowBottomBar}
-            />
-          </GlassPanel>
+          <MoreMenuPanel
+            top={insets.top + 68}
+            proMode={proMode}
+            showTopBar={showTopBar}
+            showBottomBar={showBottomBar}
+            onOpenGallery={() => openMenuItem('gallery')}
+            onOpenSettings={() => openMenuItem('settings')}
+            onToggleProMode={() => openMenuItem('pro')}
+            onToggleTopBar={setShowTopBar}
+            onToggleBottomBar={setShowBottomBar}
+          />
         )}
 
         {panel === 'quick' && (
-          <GlassPanel style={styles.quickPanel}>
-            <Text style={styles.panelTitle}>快捷设置</Text>
-            <Text style={styles.settingLabel}>宽高比</Text>
-            <View style={styles.ratioGroup}>
-              {ratios.map(item => (
-                <TouchableOpacity
-                  key={item}
-                  style={[
-                    styles.ratioItem,
-                    ratio === item && styles.ratioItemActive,
-                  ]}
-                  onPress={() => setRatio(item)}
-                >
-                  <Text
-                    style={[
-                      styles.ratioText,
-                      ratio === item && styles.ratioTextActive,
-                    ]}
-                  >
-                    {item}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            <SettingLine label="拍摄倒计时" value="关闭" />
-            <SettingLine label="对焦锁定" value="未锁定" />
-            <SettingLine label="曝光" value="0.0 EV" />
-            <SettingLine label="白平衡" value="自动" />
-          </GlassPanel>
+          <QuickSettingsPanel
+            ratios={ratios}
+            ratio={ratio}
+            captureTimerMode={captureTimerMode}
+            photoSaveMode={photoSaveMode}
+            focusLocked={focusLocked}
+            rearExposure={rearExposureBias}
+            frontExposure={frontExposureBias}
+            rearWhiteBalancePreset={rearWhiteBalancePreset}
+            frontWhiteBalancePreset={frontWhiteBalancePreset}
+            onChangeRatio={setRatio}
+            onToggleCaptureTimer={toggleCaptureTimer}
+            onChangePhotoSaveMode={setPhotoSaveMode}
+            onToggleFocusLock={toggleFocusLock}
+            onOpenExposurePanel={() => setPanel('exposure')}
+            onOpenWhiteBalancePanel={() => setPanel('whiteBalance')}
+          />
+        )}
+
+        {panel === 'exposure' && (
+          <ExposureControlPanel
+            rearExposure={rearExposureBias}
+            frontExposure={frontExposureBias}
+            rearRange={rearExposureRange}
+            frontRange={frontExposureRange}
+            onChangeRearExposure={value => applyExposureBias('rear', value)}
+            onChangeFrontExposure={value => applyExposureBias('front', value)}
+            onResetRearExposure={() => resetExposureBias('rear')}
+            onResetFrontExposure={() => resetExposureBias('front')}
+            onClose={() => setPanel('quick')}
+          />
+        )}
+
+        {panel === 'whiteBalance' && (
+          <WhiteBalanceControlPanel
+            primaryLabel="后摄像头"
+            secondaryLabel="前摄像头"
+            rearPreset={rearWhiteBalancePreset}
+            frontPreset={frontWhiteBalancePreset}
+            rearSupported={
+              rearCameraControllerRef.current?.device
+                .supportsWhiteBalanceLocking || false
+            }
+            frontSupported={
+              frontCameraControllerRef.current?.device
+                .supportsWhiteBalanceLocking || false
+            }
+            onChangeRearPreset={preset =>
+              applyWhiteBalancePreset('rear', preset)
+            }
+            onChangeFrontPreset={preset =>
+              applyWhiteBalancePreset('front', preset)
+            }
+            onClose={() => setPanel('quick')}
+          />
         )}
       </Pressable>
 
-      <CapturePreview
-        visible={previewOpen}
-        onClose={() => setPreviewOpen(false)}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.captureFlash,
+          {
+            opacity: captureFlashOpacity,
+          },
+        ]}
+      />
+      <SaveFeedbackToast feedback={saveFeedback} bottom={insets.bottom + 132} />
+      <ControlStatusToast
+        message={controlStatusMessage}
+        bottom={insets.bottom + 224}
       />
       <GalleryModal
         visible={galleryOpen}
+        assets={galleryAssets}
+        loading={galleryLoading}
         onClose={() => setGalleryOpen(false)}
+        onRefresh={loadGalleryAssets}
       />
       <SettingsDrawer
         visible={settingsOpen}
@@ -364,324 +1412,33 @@ const DualCamera = () => {
   )
 }
 
-const CameraPane = ({
-  label,
-  full,
-  secondary,
-}: {
-  label: string
-  full?: boolean
-  secondary?: boolean
-}) => (
-  <View
-    style={[
-      styles.cameraPane,
-      full && styles.cameraPaneFull,
-      secondary && styles.cameraPaneSecondary,
-    ]}
-  >
-    <CameraTexture />
-    <View style={styles.gridOverlay}>
-      <View style={styles.gridLineV} />
-      <View style={[styles.gridLineV, { left: '66.66%' }]} />
-      <View style={styles.gridLineH} />
-      <View style={[styles.gridLineH, { top: '66.66%' }]} />
-    </View>
-    <Text style={styles.cameraLabel}>{label}</Text>
-  </View>
-)
-
-const CameraTexture = ({ compact }: { compact?: boolean }) => (
-  <View style={[styles.texture, compact && styles.textureCompact]}>
-    <View style={styles.neonLine} />
-    <View style={[styles.neonLine, styles.neonLineTwo]} />
-    <View style={styles.lightBand} />
-  </View>
-)
-
-const GlassPanel = ({
-  children,
-  style,
-}: {
-  children: React.ReactNode
-  style?: object
-}) => <View style={[styles.glassPanel, style]}>{children}</View>
-
-const MenuItem = ({
-  icon,
-  label,
-  onPress,
-}: {
-  icon: string
-  label: string
-  onPress?: () => void
-}) => (
-  <TouchableOpacity
-    style={styles.menuItem}
-    activeOpacity={0.75}
-    onPress={onPress}
-  >
-    <Text style={styles.menuIcon}>{icon}</Text>
-    <Text style={styles.menuLabel}>{label}</Text>
-    <Text style={styles.menuArrow}>›</Text>
-  </TouchableOpacity>
-)
-
-const ToggleRow = ({
-  label,
-  value,
-  onValueChange,
-}: {
-  label: string
-  value: boolean
-  onValueChange: (value: boolean) => void
-}) => (
-  <TouchableOpacity
-    style={styles.menuItem}
-    activeOpacity={0.75}
-    onPress={() => onValueChange(!value)}
-  >
-    <Text style={styles.menuIcon}>{value ? '●' : '○'}</Text>
-    <Text style={styles.menuLabel}>{label}</Text>
-    <View style={[styles.switchTrack, value && styles.switchTrackActive]}>
-      <View style={[styles.switchKnob, value && styles.switchKnobActive]} />
-    </View>
-  </TouchableOpacity>
-)
-
-const SettingLine = ({ label, value }: { label: string; value: string }) => (
-  <View style={styles.settingLine}>
-    <Text style={styles.settingLineLabel}>{label}</Text>
-    <Text style={styles.settingValue}>{value}</Text>
-  </View>
-)
-
-const ModeButton = ({
-  active,
-  label,
-  onPress,
-}: {
-  active: boolean
-  label: string
-  onPress: () => void
-}) => (
-  <TouchableOpacity
-    style={[styles.modeButton, active && styles.modeButtonActive]}
-    activeOpacity={0.8}
-    onPress={onPress}
-  >
-    <Text style={[styles.modeText, active && styles.modeTextActive]}>
-      {label}
-    </Text>
-  </TouchableOpacity>
-)
-
-const CapturePreview = ({
-  visible,
-  onClose,
-}: {
-  visible: boolean
-  onClose: () => void
-}) => (
-  <Modal visible={visible} animationType="fade" transparent>
-    <View style={styles.modalBackdrop}>
-      <View style={styles.previewCard}>
-        <Text style={styles.modalTitle}>拍照预览</Text>
-        <View style={styles.photoPair}>
-          <PhotoMock label="后置" />
-          <PhotoMock label="前置" />
-        </View>
-        <View style={styles.modalActions}>
-          <TouchableOpacity style={styles.secondaryAction} onPress={onClose}>
-            <Text style={styles.actionText}>重拍</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.primaryAction} onPress={onClose}>
-            <Text style={styles.actionText}>保存</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </View>
-  </Modal>
-)
-
-const PhotoMock = ({ label }: { label: string }) => (
-  <View style={styles.photoMock}>
-    <CameraTexture />
-    <Text style={styles.photoLabel}>{label}</Text>
-  </View>
-)
-
-const GalleryModal = ({
-  visible,
-  onClose,
-}: {
-  visible: boolean
-  onClose: () => void
-}) => (
-  <Modal visible={visible} animationType="slide">
-    <SafeAreaView style={styles.galleryRoot}>
-      <View style={styles.modalHeader}>
-        <Text style={styles.modalTitle}>相册</Text>
-        <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
-          <Text style={styles.iconText}>×</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.filterTabs}>
-        {['全部', '双摄照片', '视频'].map(item => (
-          <View key={item} style={styles.filterTab}>
-            <Text style={styles.filterText}>{item}</Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.galleryGrid}>
-        {Array.from({ length: 12 }).map((_, index) => (
-          <View key={index} style={styles.galleryTile}>
-            <CameraTexture compact />
-            <Text style={styles.dualBadge}>
-              {index % 3 === 0 ? '视频' : '双摄'}
-            </Text>
-          </View>
-        ))}
-      </View>
-    </SafeAreaView>
-  </Modal>
-)
-
-const SettingsDrawer = ({
-  visible,
-  onClose,
-}: {
-  visible: boolean
-  onClose: () => void
-}) => (
-  <Modal visible={visible} animationType="slide" transparent>
-    <View style={styles.drawerBackdrop}>
-      <View style={styles.drawer}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>设置</Text>
-          <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
-            <Text style={styles.iconText}>×</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <SettingsSection
-            title="拍摄设置"
-            items={[
-              '网格辅助线 开',
-              '定时拍照 关闭',
-              'HDR 开',
-              '焦段切换提示 开',
-            ]}
-          />
-          <SettingsSection
-            title="视频设置"
-            items={[
-              '分辨率 1080p 30fps',
-              '双视频合成 画中画',
-              '专业模式录制 关',
-            ]}
-          />
-          <SettingsSection
-            title="界面设置"
-            items={['音量键快门 开', '降低透明度省电 关', '显示闪光灯标识 开']}
-          />
-          <SettingsSection
-            title="高级设置"
-            items={['AI场景识别 开', '自动云备份 关', '拍摄数据分析 开']}
-          />
-        </ScrollView>
-      </View>
-    </View>
-  </Modal>
-)
-
-const SettingsSection = ({
-  title,
-  items,
-}: {
-  title: string
-  items: string[]
-}) => (
-  <View style={styles.settingsSection}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    {items.map(item => (
-      <View key={item} style={styles.drawerItem}>
-        <Text style={styles.drawerItemText}>{item}</Text>
-        <Text style={styles.menuArrow}>›</Text>
-      </View>
-    ))}
-  </View>
-)
-
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: '#000' },
   preview: { flex: 1, backgroundColor: '#020303' },
-  cameraPane: { flex: 1, overflow: 'hidden', backgroundColor: '#071012' },
-  cameraPaneFull: { ...StyleSheet.absoluteFillObject },
-  cameraPaneSecondary: { backgroundColor: '#0d1216' },
-  texture: { ...StyleSheet.absoluteFillObject, backgroundColor: '#06090a' },
-  textureCompact: { borderRadius: 22 },
-  neonLine: {
-    position: 'absolute',
-    top: '18%',
-    left: '8%',
-    width: '88%',
-    height: 2,
-    backgroundColor: 'rgba(92, 255, 219, 0.55)',
-    transform: [{ rotate: '-18deg' }],
-  },
-  neonLineTwo: {
-    top: '34%',
-    left: '28%',
-    width: '62%',
-    backgroundColor: 'rgba(80, 200, 255, 0.4)',
-    transform: [{ rotate: '72deg' }],
-  },
-  lightBand: {
-    position: 'absolute',
-    top: '38%',
-    left: '-10%',
-    width: '120%',
-    height: 18,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-    transform: [{ rotate: '-2deg' }],
-  },
-  gridOverlay: { ...StyleSheet.absoluteFillObject, opacity: 0.26 },
-  gridLineV: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    left: '33.33%',
-    width: 1,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  gridLineH: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '33.33%',
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-  },
-  cameraLabel: {
-    position: 'absolute',
-    left: 18,
-    bottom: 26,
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
   splitDivider: { height: 2, backgroundColor: 'rgba(255,255,255,0.16)' },
   pip: {
     position: 'absolute',
-    right: 18,
     width: 142,
     height: 184,
-    borderRadius: 28,
+    borderRadius: pipCornerRadius,
+    padding: 3,
+    backgroundColor: 'rgba(255,255,255,0.38)',
+    zIndex: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.24,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 8,
+  },
+  pipInner: {
+    flex: 1,
+    borderRadius: pipCornerRadius - 3,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
-    backgroundColor: '#0a0f12',
+    backgroundColor: 'transparent',
+  },
+  pipPreviewSurface: {
+    borderRadius: pipCornerRadius - 3,
+    backgroundColor: 'transparent',
   },
   pipLabel: {
     position: 'absolute',
@@ -689,291 +1446,12 @@ const styles = StyleSheet.create({
     bottom: 12,
     color: 'rgba(255,255,255,0.72)',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '400',
   },
-  pipToolbar: {
-    position: 'absolute',
-    top: 10,
-    right: 8,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 18,
-    backgroundColor: 'rgba(24,28,32,0.72)',
-  },
-  pipTool: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  captureState: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  statePill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    paddingHorizontal: 8,
-    paddingVertical: 5,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  activeState: { borderWidth: 1, borderColor: 'rgba(0,212,255,0.3)' },
-  stateDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#00ff80',
-  },
-  stateText: {
-    color: 'rgba(255,255,255,0.76)',
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  recordingText: { color: '#ff4757' },
-  topTools: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  glassCircle: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(23,24,27,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.13)',
-  },
-  iconText: { color: '#fff', fontSize: 22, fontWeight: '700' },
-  lensPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 18,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: 'rgba(23,24,27,0.78)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.13)',
-  },
-  lensText: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  chevron: { color: 'rgba(255,255,255,0.76)', fontSize: 20, fontWeight: '900' },
-  zoomBar: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  zoomItem: {
-    paddingHorizontal: 13,
-    paddingVertical: 7,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.09)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  zoomItemActive: {
-    backgroundColor: 'rgba(0,212,255,0.18)',
-    borderColor: 'rgba(0,212,255,0.36)',
-  },
-  zoomText: {
-    color: 'rgba(255,255,255,0.56)',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  zoomTextActive: { color: '#58e8ff' },
-  bottomSafe: { position: 'absolute', left: 0, right: 0, bottom: 0 },
-  bottomArea: {
-    paddingHorizontal: 18,
-    paddingTop: 18,
-    paddingBottom: 12,
-    backgroundColor: 'rgba(0,0,0,0.18)',
-  },
-  modeTabs: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  modeButton: {
-    paddingHorizontal: 18,
-    paddingVertical: 8,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  modeButtonActive: { backgroundColor: 'rgba(255,255,255,0.17)' },
-  modeText: {
-    color: 'rgba(255,255,255,0.56)',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  modeTextActive: { color: '#fff' },
-  controlRow: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 12,
-    marginBottom: 10,
-  },
-  controlChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255,255,255,0.11)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  chipIcon: { color: '#fff', fontSize: 13 },
-  chipText: {
-    color: 'rgba(255,255,255,0.78)',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  timer: { color: '#ff4757', fontSize: 13, fontWeight: '900' },
-  shutterRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  sideButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(23,24,27,0.86)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  shutterOuter: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 5,
-    borderColor: 'rgba(255,255,255,0.72)',
-    backgroundColor: 'rgba(255,255,255,0.18)',
-  },
-  shutterInner: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: '#e8e8ea',
-  },
-  shutterRecording: {
-    width: 30,
-    height: 30,
-    borderRadius: 8,
-    backgroundColor: '#ff4757',
-  },
-  glassPanel: {
-    position: 'absolute',
-    borderRadius: 22,
-    padding: 12,
-    backgroundColor: 'rgba(22,24,27,0.86)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  menuPanel: { right: 18, width: 220 },
-  quickPanel: { right: 18, bottom: 128, width: 246 },
-  panelTitle: {
-    color: 'rgba(255,255,255,0.46)',
-    fontSize: 12,
-    fontWeight: '900',
-    marginBottom: 10,
-    textTransform: 'uppercase',
-  },
-  menuItem: {
-    minHeight: 46,
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  menuIcon: {
-    width: 24,
-    color: 'rgba(255,255,255,0.84)',
-    fontSize: 20,
-    textAlign: 'center',
-  },
-  menuLabel: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '700' },
-  menuArrow: {
-    color: 'rgba(255,255,255,0.78)',
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  switchTrack: {
-    width: 38,
-    height: 22,
-    borderRadius: 11,
-    backgroundColor: 'rgba(255,255,255,0.25)',
-    padding: 2,
-  },
-  switchTrackActive: { backgroundColor: '#00d4ff' },
-  switchKnob: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
+  captureFlash: {
+    ...StyleSheet.absoluteFillObject,
     backgroundColor: '#fff',
   },
-  switchKnobActive: { transform: [{ translateX: 16 }] },
-  settingLabel: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  ratioGroup: { flexDirection: 'row', gap: 6, marginBottom: 8 },
-  ratioItem: {
-    paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  ratioItemActive: {
-    backgroundColor: 'rgba(0,212,255,0.18)',
-    borderWidth: 1,
-    borderColor: 'rgba(0,212,255,0.35)',
-  },
-  ratioText: {
-    color: 'rgba(255,255,255,0.58)',
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  ratioTextActive: { color: '#58e8ff' },
-  settingLine: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    minHeight: 38,
-    borderRadius: 12,
-    paddingHorizontal: 8,
-  },
-  settingLineLabel: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  settingValue: { color: '#58e8ff', fontSize: 12, fontWeight: '800' },
   proPanel: {
     position: 'absolute',
     left: 16,
@@ -994,146 +1472,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
-  proText: { color: '#fff', fontSize: 12, fontWeight: '800' },
-  modalBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.78)',
-    padding: 18,
-  },
-  previewCard: {
-    borderRadius: 26,
-    padding: 18,
-    backgroundColor: '#111318',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  modalTitle: { color: '#fff', fontSize: 24, fontWeight: '900' },
-  photoPair: { flexDirection: 'row', gap: 12, marginTop: 18 },
-  photoMock: {
-    flex: 1,
-    aspectRatio: 3 / 4,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: '#080b0c',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  photoLabel: {
-    position: 'absolute',
-    left: 12,
-    bottom: 12,
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  modalActions: { flexDirection: 'row', gap: 12, marginTop: 18 },
-  secondaryAction: {
-    flex: 1,
-    paddingVertical: 15,
-    alignItems: 'center',
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  primaryAction: {
-    flex: 1,
-    paddingVertical: 15,
-    alignItems: 'center',
-    borderRadius: 18,
-    backgroundColor: 'rgba(0,212,255,0.32)',
-  },
-  actionText: { color: '#fff', fontSize: 16, fontWeight: '900' },
-  galleryRoot: { flex: 1, backgroundColor: '#08090c' },
-  modalHeader: {
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  closeCircle: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  filterTabs: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 18,
-    marginBottom: 14,
-  },
-  filterTab: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  filterText: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-    fontWeight: '800',
-  },
-  galleryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    paddingHorizontal: 4,
-  },
-  galleryTile: {
-    width: '32.6%',
-    aspectRatio: 1,
-    overflow: 'hidden',
-    backgroundColor: '#111',
-    position: 'relative',
-  },
-  dualBadge: {
-    position: 'absolute',
-    right: 6,
-    bottom: 6,
-    color: '#fff',
-    fontSize: 11,
-    fontWeight: '900',
-    paddingHorizontal: 6,
-    paddingVertical: 3,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.48)',
-  },
-  drawerBackdrop: {
-    flex: 1,
-    alignItems: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  drawer: {
-    width: '86%',
-    height: '100%',
-    paddingTop: 36,
-    paddingHorizontal: 12,
-    backgroundColor: '#090b12',
-  },
-  settingsSection: { marginBottom: 24 },
-  sectionTitle: {
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 12,
-    fontWeight: '900',
-    marginHorizontal: 8,
-    marginBottom: 10,
-  },
-  drawerItem: {
-    minHeight: 54,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  drawerItemText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  proText: { color: '#fff', fontSize: 12, fontWeight: '400' },
 })
 
 export default DualCamera
