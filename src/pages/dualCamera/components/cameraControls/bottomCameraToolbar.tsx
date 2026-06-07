@@ -1,13 +1,13 @@
 import React from 'react'
 import {
   Animated,
-  SafeAreaView,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
 } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { SafeAreaView } from 'react-native-safe-area-context'
 import { ModeButton } from '../controls'
 import type { CaptureMode } from './types'
 

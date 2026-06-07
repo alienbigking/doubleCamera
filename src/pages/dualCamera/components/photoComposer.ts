@@ -4,10 +4,15 @@ import {
   ImageFormat,
   PaintStyle,
   Skia,
-  type SkImage,
   type SkRect,
 } from '@shopify/react-native-skia'
 import type { LayoutMode } from './cameraControls'
+import {
+  drawFilteredImageRect,
+  getDualCameraFilterRenderQualityPreset,
+  type DualCameraFilterId,
+  type DualCameraFilterRenderQuality,
+} from './filters'
 
 type CameraSide = 'rear' | 'front'
 type Point = { x: number; y: number }
@@ -21,17 +26,31 @@ export type ComposePhotoOptions = {
   pipPosition: Point
   pipSize: Size
   previewSize: Size
+  filterId: DualCameraFilterId
+  renderQuality: DualCameraFilterRenderQuality
 }
-
-const maxCanvasLongSide = 1600
 
 const stripFileScheme = (uri: string) =>
   uri.startsWith('file://') ? uri.replace('file://', '') : uri
 
+const ensureFileUri = (uri: string) =>
+  uri.startsWith('file://') ? uri : `file://${uri}`
+
 const loadImage = async (uri: string) => {
+  const directData = await Skia.Data.fromURI(ensureFileUri(uri)).catch(
+    () => null,
+  )
+  const directImage = directData
+    ? Skia.Image.MakeImageFromEncoded(directData)
+    : null
+
+  if (directImage) {
+    return directImage
+  }
+
   const base64 = await RNFS.readFile(stripFileScheme(uri), 'base64')
-  const data = Skia.Data.fromBase64(base64)
-  const image = Skia.Image.MakeImageFromEncoded(data)
+  const fallbackData = Skia.Data.fromBase64(base64)
+  const image = Skia.Image.MakeImageFromEncoded(fallbackData)
 
   if (!image) {
     throw new Error(`Failed to decode image: ${uri}`)
@@ -40,53 +59,19 @@ const loadImage = async (uri: string) => {
   return image
 }
 
-const fitCanvasSize = (image: SkImage): Size => {
+const fitCanvasSize = (
+  image: Awaited<ReturnType<typeof loadImage>>,
+  renderQuality: DualCameraFilterRenderQuality,
+): Size => {
+  const { maxLongSide } = getDualCameraFilterRenderQualityPreset(renderQuality)
   const width = image.width()
   const height = image.height()
   const longSide = Math.max(width, height)
-  const scale = longSide > maxCanvasLongSide ? maxCanvasLongSide / longSide : 1
+  const scale = longSide > maxLongSide ? maxLongSide / longSide : 1
 
   return {
     width: Math.round(width * scale),
     height: Math.round(height * scale),
-  }
-}
-
-const coverSourceRect = (image: SkImage, dest: Size): SkRect => {
-  const imageWidth = image.width()
-  const imageHeight = image.height()
-  const imageRatio = imageWidth / imageHeight
-  const destRatio = dest.width / dest.height
-
-  if (imageRatio > destRatio) {
-    const sourceWidth = imageHeight * destRatio
-    return Skia.XYWHRect(
-      (imageWidth - sourceWidth) / 2,
-      0,
-      sourceWidth,
-      imageHeight,
-    )
-  }
-
-  const sourceHeight = imageWidth / destRatio
-  return Skia.XYWHRect(
-    0,
-    (imageHeight - sourceHeight) / 2,
-    imageWidth,
-    sourceHeight,
-  )
-}
-
-const drawCoverImage = (image: SkImage, dest: SkRect) => {
-  const paint = Skia.Paint()
-  paint.setAntiAlias(true)
-
-  return {
-    paint,
-    source: coverSourceRect(image, {
-      width: dest.width,
-      height: dest.height,
-    }),
   }
 }
 
@@ -101,6 +86,8 @@ export const composeDualPhoto = async ({
   pipPosition,
   pipSize,
   previewSize,
+  filterId,
+  renderQuality,
 }: ComposePhotoOptions) => {
   const secondaryCamera: CameraSide =
     primaryCamera === 'rear' ? 'front' : 'rear'
@@ -109,10 +96,12 @@ export const composeDualPhoto = async ({
   const canvasSize =
     layout === 'split'
       ? {
-          width: fitCanvasSize(primaryImage).width,
-          height: Math.round((fitCanvasSize(primaryImage).width * 4) / 3),
+          width: fitCanvasSize(primaryImage, renderQuality).width,
+          height: Math.round(
+            (fitCanvasSize(primaryImage, renderQuality).width * 4) / 3,
+          ),
         }
-      : fitCanvasSize(primaryImage)
+      : fitCanvasSize(primaryImage, renderQuality)
   const surface = Skia.Surface.MakeOffscreen(
     canvasSize.width,
     canvasSize.height,
@@ -135,20 +124,26 @@ export const composeDualPhoto = async ({
     )
     const topImage = primaryImage
     const bottomImage = secondaryImage
-    const top = drawCoverImage(topImage, topRect)
-    const bottom = drawCoverImage(bottomImage, bottomRect)
-    canvas.drawImageRect(topImage, top.source, topRect, top.paint, true)
-    canvas.drawImageRect(
-      bottomImage,
-      bottom.source,
-      bottomRect,
-      bottom.paint,
-      true,
-    )
+    drawFilteredImageRect({
+      canvas,
+      image: topImage,
+      destRect: topRect,
+      filterId,
+    })
+    drawFilteredImageRect({
+      canvas,
+      image: bottomImage,
+      destRect: bottomRect,
+      filterId,
+    })
   } else {
     const mainRect = Skia.XYWHRect(0, 0, canvasSize.width, canvasSize.height)
-    const main = drawCoverImage(primaryImage, mainRect)
-    canvas.drawImageRect(primaryImage, main.source, mainRect, main.paint, true)
+    drawFilteredImageRect({
+      canvas,
+      image: primaryImage,
+      destRect: mainRect,
+      filterId,
+    })
 
     const scaleX = canvasSize.width / previewSize.width
     const scaleY = canvasSize.height / previewSize.height
@@ -159,21 +154,18 @@ export const composeDualPhoto = async ({
       pipSize.height * scaleY,
     )
     const insetRadius = Math.min(insetRect.width, insetRect.height) * 0.18
-    const inset = drawCoverImage(secondaryImage, insetRect)
-
     canvas.save()
     canvas.clipRRect(
       Skia.RRectXY(insetRect, insetRadius, insetRadius),
       ClipOp.Intersect,
       true,
     )
-    canvas.drawImageRect(
-      secondaryImage,
-      inset.source,
-      insetRect,
-      inset.paint,
-      true,
-    )
+    drawFilteredImageRect({
+      canvas,
+      image: secondaryImage,
+      destRect: insetRect,
+      filterId,
+    })
     canvas.restore()
 
     const borderPaint = Skia.Paint()
@@ -189,7 +181,8 @@ export const composeDualPhoto = async ({
 
   surface.flush()
   const snapshot = surface.makeImageSnapshot()
-  const outputBase64 = snapshot.encodeToBase64(ImageFormat.JPEG, 92)
+  const { jpegQuality } = getDualCameraFilterRenderQualityPreset(renderQuality)
+  const outputBase64 = snapshot.encodeToBase64(ImageFormat.JPEG, jpegQuality)
   const outputPath = createOutputPath()
   await RNFS.writeFile(outputPath, outputBase64, 'base64')
 

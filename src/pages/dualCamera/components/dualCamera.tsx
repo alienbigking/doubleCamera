@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
   Dimensions,
@@ -29,14 +29,23 @@ import {
 } from 'react-native-vision-camera'
 import {
   BottomCameraToolbar,
+  clampNumber,
   ControlStatusToast,
+  defaultProfessionalShutterDuration,
   ExposureControlPanel,
   type ExposureRange,
   type FlashMode,
+  getSupportedShutterPresets,
   LensPickerPanel,
   MoreMenuPanel,
+  ProfessionalQuickAdjustPanel,
+  ProfessionalStatusStrip,
   QuickSettingsPanel,
   SaveFeedbackToast,
+  TopMenuAiEnhancePanel,
+  TopMenuDisplayPanel,
+  TopMenuFilterPanel,
+  TopMenuProfessionalPanel,
   TopCameraToolbar,
   WhiteBalanceControlPanel,
   whiteBalanceOptions,
@@ -53,6 +62,16 @@ import {
 import { GalleryModal, type GalleryAsset, SettingsDrawer } from './overlays'
 import { CameraPane, CameraPreviewSurface } from './cameraPreview'
 import { composeDualPhoto } from './photoComposer'
+import {
+  applyFilterToPhoto,
+  type DualCameraFilterId,
+  type DualCameraFilterRenderQuality,
+} from './filters'
+import {
+  getGalleryAssetIndex,
+  markGalleryAssets,
+  type GalleryAssetKind,
+} from './galleryAssetIndex'
 
 type CameraSide = 'rear' | 'front'
 type PreviewStatus = 'loading' | 'ready' | 'denied' | 'unavailable' | 'error'
@@ -65,6 +84,7 @@ type CameraPair = Record<CameraSide, CameraDevice>
 type Point = { x: number; y: number }
 type CapturedPhotoFiles = Record<CameraSide, string> & { capturedAt: string }
 type RecordedVideo = { side: CameraSide; filePath: string }
+type SavedCameraRollAsset = Awaited<ReturnType<typeof CameraRoll.saveAsset>>
 
 const defaultLensOptions: LensOption[] = [
   {
@@ -81,6 +101,8 @@ const pipCornerRadius = 32
 const albumName = 'DualCam'
 const stabilizationPriority: StabilizationMode[] = ['standard', 'cinematic']
 const captureTimerModes: CaptureTimerMode[] = ['off', '3s', '10s']
+const defaultProfessionalISO = 120
+const defaultProfessionalFocusPosition = 0.5
 const defaultExposureRange: ExposureRange = {
   min: -1,
   max: 1,
@@ -246,9 +268,20 @@ const DualCamera = () => {
   const [recordingSeconds, setRecordingSeconds] = useState(0)
   const [proMode, setProMode] = useState(false)
   const [photoSaveMode, setPhotoSaveMode] = useState<PhotoSaveMode>('combined')
+  const [selectedFilterId, setSelectedFilterId] =
+    useState<DualCameraFilterId>('none')
+  const [filterRenderQuality, setFilterRenderQuality] =
+    useState<DualCameraFilterRenderQuality>('standard')
   const [captureTimerMode, setCaptureTimerMode] =
     useState<CaptureTimerMode>('off')
   const [focusLocked, setFocusLocked] = useState(false)
+  const [proISO, setProISO] = useState(defaultProfessionalISO)
+  const [proShutterDuration, setProShutterDuration] = useState(
+    defaultProfessionalShutterDuration,
+  )
+  const [proFocusPosition, setProFocusPosition] = useState(
+    defaultProfessionalFocusPosition,
+  )
   const [rearExposureBias, setRearExposureBias] = useState(0)
   const [frontExposureBias, setFrontExposureBias] = useState(0)
   const [rearWhiteBalancePreset, setRearWhiteBalancePreset] =
@@ -456,6 +489,7 @@ const DualCamera = () => {
           }
           rearCameraControllerRef.current = controllers[0] || null
           frontCameraControllerRef.current = controllers[1] || null
+          syncProfessionalDefaultsFromController(controllers[0] || null)
           videoOutputsRef.current = {}
           setVideoCaptureReady(false)
           setLensOptions(rearLensOptions)
@@ -528,6 +562,19 @@ const DualCamera = () => {
     lensOptions.find(option => option.id === selectedLensId) ||
     lensOptions[0] ||
     defaultLensOptions[0]
+  const rearController = rearCameraControllerRef.current
+  const supportsProfessionalExposure =
+    Platform.OS === 'ios' && !!rearController?.device.supportsExposureLocking
+  const supportsProfessionalFocus =
+    Platform.OS === 'ios' && !!rearController?.device.supportsFocusLocking
+  const professionalShutterOptions = supportsProfessionalExposure
+    ? getSupportedShutterPresets(
+        rearController?.minExposureDuration ||
+          defaultProfessionalShutterDuration,
+        rearController?.maxExposureDuration ||
+          defaultProfessionalShutterDuration,
+      )
+    : [defaultProfessionalShutterDuration]
 
   const topVisible = showTopBar || panel !== null
   const bottomVisible = showBottomBar || panel !== null
@@ -545,9 +592,11 @@ const DualCamera = () => {
         return
       }
 
+      const galleryAssetIndex = await getGalleryAssetIndex()
       const result = await CameraRoll.getPhotos({
         first: 60,
         assetType: 'All',
+        groupName: albumName,
         include: ['filename', 'fileSize', 'imageSize', 'playableDuration'],
       })
 
@@ -557,6 +606,7 @@ const DualCamera = () => {
           uri: edge.node.image.uri,
           type: edge.node.type,
           filename: edge.node.image.filename || undefined,
+          kind: galleryAssetIndex[edge.node.id],
         })),
       )
     } catch (error) {
@@ -614,6 +664,224 @@ const DualCamera = () => {
     }, 1000)
   }
 
+  const syncProfessionalDefaultsFromController = (
+    controller: CameraController | null,
+  ) => {
+    if (!controller || Platform.OS !== 'ios') return
+
+    if (controller.device.supportsExposureLocking) {
+      const minISO = controller.minISO > 0 ? controller.minISO : 1
+      const maxISO =
+        controller.maxISO > 0
+          ? controller.maxISO
+          : Math.max(minISO, defaultProfessionalISO)
+      const nextISO = clampNumber(
+        controller.iso > 0 ? controller.iso : defaultProfessionalISO,
+        minISO,
+        maxISO,
+      )
+      const minDuration =
+        controller.minExposureDuration > 0
+          ? controller.minExposureDuration
+          : defaultProfessionalShutterDuration
+      const maxDuration =
+        controller.maxExposureDuration > 0
+          ? controller.maxExposureDuration
+          : minDuration
+      const shutterPresets = getSupportedShutterPresets(
+        minDuration,
+        maxDuration,
+      )
+      const nextDuration = clampNumber(
+        controller.exposureDuration > 0
+          ? controller.exposureDuration
+          : shutterPresets[0] || defaultProfessionalShutterDuration,
+        minDuration,
+        maxDuration,
+      )
+
+      setProISO(nextISO)
+      setProShutterDuration(nextDuration)
+    }
+
+    if (controller.device.supportsFocusLocking) {
+      setProFocusPosition(
+        clampNumber(
+          controller.lensPosition > 0
+            ? controller.lensPosition
+            : defaultProfessionalFocusPosition,
+          0,
+          1,
+        ),
+      )
+    }
+  }
+
+  const applyProfessionalExposureSettings = async (
+    iso: number,
+    duration: number,
+    controller = rearCameraControllerRef.current,
+  ) => {
+    if (
+      !controller ||
+      Platform.OS !== 'ios' ||
+      !controller.device.supportsExposureLocking
+    ) {
+      return false
+    }
+
+    const minISO = controller.minISO > 0 ? controller.minISO : 1
+    const maxISO =
+      controller.maxISO > 0 ? controller.maxISO : Math.max(minISO, iso)
+    const minDuration =
+      controller.minExposureDuration > 0
+        ? controller.minExposureDuration
+        : defaultProfessionalShutterDuration
+    const maxDuration =
+      controller.maxExposureDuration > 0
+        ? controller.maxExposureDuration
+        : Math.max(minDuration, duration)
+
+    await controller.setExposureLocked(
+      clampNumber(duration, minDuration, maxDuration),
+      clampNumber(iso, minISO, maxISO),
+    )
+
+    return true
+  }
+
+  const applyProfessionalFocusSettings = async (
+    position: number,
+    controller = rearCameraControllerRef.current,
+  ) => {
+    if (
+      !controller ||
+      Platform.OS !== 'ios' ||
+      !controller.device.supportsFocusLocking
+    ) {
+      return false
+    }
+
+    await controller.setFocusLocked(clampNumber(position, 0, 1))
+    return true
+  }
+
+  const toggleProfessionalMode = async (enabled: boolean) => {
+    const controller = rearCameraControllerRef.current
+    if (!controller) return
+
+    const supportsExposure =
+      Platform.OS === 'ios' && controller.device.supportsExposureLocking
+    const supportsFocus =
+      Platform.OS === 'ios' && controller.device.supportsFocusLocking
+
+    if (!supportsExposure && !supportsFocus) {
+      showControlStatusMessage('当前设备不支持专业模式')
+      return
+    }
+
+    try {
+      if (enabled) {
+        if (supportsExposure) {
+          await applyProfessionalExposureSettings(
+            proISO,
+            proShutterDuration,
+            controller,
+          )
+        }
+        if (supportsFocus) {
+          await applyProfessionalFocusSettings(proFocusPosition, controller)
+        }
+        setProMode(true)
+        setFocusLocked(false)
+        showControlStatusMessage('专业模式已开启')
+      } else {
+        await controller.resetFocus()
+        setProMode(false)
+        setFocusLocked(false)
+        setRearWhiteBalancePreset('auto')
+        showControlStatusMessage('专业模式已关闭')
+      }
+    } catch (error) {
+      console.warn('Toggle professional mode failed', error)
+      showControlStatusMessage('专业模式切换失败')
+    }
+  }
+
+  const previewProfessionalISO = (value: number) => {
+    const controller = rearCameraControllerRef.current
+    if (!controller || !controller.device.supportsExposureLocking) return
+
+    setProISO(
+      clampNumber(
+        Math.round(value),
+        controller.minISO > 0 ? controller.minISO : 1,
+        controller.maxISO > 0 ? controller.maxISO : Math.max(1, value),
+      ),
+    )
+  }
+
+  const commitProfessionalISO = async (value: number) => {
+    previewProfessionalISO(value)
+    if (!proMode) return
+
+    try {
+      await applyProfessionalExposureSettings(
+        Math.round(value),
+        proShutterDuration,
+      )
+    } catch (error) {
+      console.warn('Set professional ISO failed', error)
+      showControlStatusMessage('ISO 设置失败')
+    }
+  }
+
+  const selectProfessionalShutter = async (value: number) => {
+    setProShutterDuration(value)
+    if (!proMode) return
+
+    try {
+      await applyProfessionalExposureSettings(proISO, value)
+    } catch (error) {
+      console.warn('Set professional shutter failed', error)
+      showControlStatusMessage('快门设置失败')
+    }
+  }
+
+  const previewProfessionalFocusPosition = (value: number) => {
+    setProFocusPosition(clampNumber(value, 0, 1))
+  }
+
+  const commitProfessionalFocusPosition = async (value: number) => {
+    previewProfessionalFocusPosition(value)
+    if (!proMode) return
+
+    try {
+      await applyProfessionalFocusSettings(value)
+    } catch (error) {
+      console.warn('Set professional focus failed', error)
+      showControlStatusMessage('手动对焦失败')
+    }
+  }
+
+  const handleTopBarVisibilityChange = (value: boolean) => {
+    if (!value && !showBottomBar) {
+      showControlStatusMessage('至少保留一个工具栏')
+      return
+    }
+
+    setShowTopBar(value)
+  }
+
+  const handleBottomBarVisibilityChange = (value: boolean) => {
+    if (!value && !showTopBar) {
+      showControlStatusMessage('至少保留一个工具栏')
+      return
+    }
+
+    setShowBottomBar(value)
+  }
+
   const toggleStabilizationMode = () => {
     if (mode === 'photo') {
       showControlStatusMessage('防抖仅录像生效')
@@ -647,6 +915,11 @@ const DualCamera = () => {
   }
 
   const toggleFocusLock = async () => {
+    if (proMode) {
+      showControlStatusMessage('请先退出专业模式')
+      return
+    }
+
     const controller = rearCameraControllerRef.current
     if (!controller?.device.supportsFocusLocking) {
       showControlStatusMessage('当前设备不支持锁焦')
@@ -687,6 +960,11 @@ const DualCamera = () => {
       ? rearCameraControllerRef.current
       : frontCameraControllerRef.current,
   ) => {
+    if (side === 'rear' && proMode) {
+      showControlStatusMessage('专业模式下请调 ISO 和快门')
+      return
+    }
+
     if (!controller?.device.supportsExposureBias) {
       showControlStatusMessage('当前设备不支持曝光补偿')
       return
@@ -722,6 +1000,11 @@ const DualCamera = () => {
       ? rearCameraControllerRef.current
       : frontCameraControllerRef.current,
   ) => {
+    if (side === 'rear' && proMode) {
+      showControlStatusMessage('请先退出专业模式')
+      return
+    }
+
     if (!controller?.device.supportsWhiteBalanceLocking) {
       showControlStatusMessage('当前设备不支持白平衡锁定')
       return
@@ -813,30 +1096,52 @@ const DualCamera = () => {
   }
 
   const prependGalleryAssets = (
-    assets: Awaited<ReturnType<typeof CameraRoll.saveAsset>>[],
+    assets: { asset: SavedCameraRollAsset; kind: GalleryAssetKind }[],
   ) => {
     setGalleryAssets(previous => [
-      ...assets.map(asset => ({
+      ...assets.map(({ asset, kind }) => ({
         id: asset.node.id,
         uri: asset.node.image.uri,
         type: asset.node.type,
         filename: asset.node.image.filename || undefined,
+        kind,
       })),
       ...previous,
     ])
   }
 
-  const saveSeparatePhotoAssets = async (photos: CapturedPhotoFiles) =>
-    Promise.all([
-      CameraRoll.saveAsset(photos.rear, {
-        type: 'photo',
-        album: albumName,
-      }),
-      CameraRoll.saveAsset(photos.front, {
-        type: 'photo',
-        album: albumName,
-      }),
-    ])
+  const markSavedGalleryAssets = async (
+    assets: SavedCameraRollAsset[],
+    kind: GalleryAssetKind,
+  ) => {
+    await markGalleryAssets(
+      assets.map(asset => asset.node.id),
+      kind,
+    )
+  }
+
+  const saveSeparatePhotoAssets = async (photos: CapturedPhotoFiles) => {
+    const rearPhotoUri = await applyFilterToPhoto(
+      photos.rear,
+      selectedFilterId,
+      filterRenderQuality,
+    )
+    const rearAsset = await CameraRoll.saveAsset(rearPhotoUri, {
+      type: 'photo',
+      album: albumName,
+    })
+    const frontPhotoUri = await applyFilterToPhoto(
+      photos.front,
+      selectedFilterId,
+      filterRenderQuality,
+    )
+    const frontAsset = await CameraRoll.saveAsset(frontPhotoUri, {
+      type: 'photo',
+      album: albumName,
+    })
+
+    return [rearAsset, frontAsset]
+  }
 
   const saveCombinedPhotoAsset = async (photos: CapturedPhotoFiles) => {
     const { width, height } = Dimensions.get('window')
@@ -847,6 +1152,8 @@ const DualCamera = () => {
       pipPosition,
       pipSize,
       previewSize: { width, height },
+      filterId: selectedFilterId,
+      renderQuality: filterRenderQuality,
     })
     return CameraRoll.saveAsset(combinedPhotoUri, {
       type: 'photo',
@@ -862,7 +1169,8 @@ const DualCamera = () => {
     }
 
     const assets = await saveSeparatePhotoAssets(photos)
-    prependGalleryAssets(assets)
+    await markSavedGalleryAssets(assets, 'singlePhoto')
+    prependGalleryAssets(assets.map(asset => ({ asset, kind: 'singlePhoto' })))
   }
 
   const saveCombinedPhoto = async (photos: CapturedPhotoFiles) => {
@@ -873,7 +1181,8 @@ const DualCamera = () => {
     }
 
     const asset = await saveCombinedPhotoAsset(photos)
-    prependGalleryAssets([asset])
+    await markSavedGalleryAssets([asset], 'dualPhoto')
+    prependGalleryAssets([{ asset, kind: 'dualPhoto' }])
   }
 
   const saveCombinedAndSeparatePhotos = async (photos: CapturedPhotoFiles) => {
@@ -885,7 +1194,12 @@ const DualCamera = () => {
 
     const combinedAsset = await saveCombinedPhotoAsset(photos)
     const separateAssets = await saveSeparatePhotoAssets(photos)
-    prependGalleryAssets([combinedAsset, ...separateAssets])
+    await markSavedGalleryAssets([combinedAsset], 'dualPhoto')
+    await markSavedGalleryAssets(separateAssets, 'singlePhoto')
+    prependGalleryAssets([
+      { asset: combinedAsset, kind: 'dualPhoto' },
+      ...separateAssets.map(asset => ({ asset, kind: 'singlePhoto' as const })),
+    ])
   }
 
   const capturePhotos = async () => {
@@ -1013,8 +1327,21 @@ const DualCamera = () => {
       }
       rearCameraControllerRef.current = controllers[0] || null
       frontCameraControllerRef.current = controllers[1] || null
+      if (proMode) {
+        await applyProfessionalExposureSettings(
+          proISO,
+          proShutterDuration,
+          controllers[0] || null,
+        )
+        await applyProfessionalFocusSettings(
+          proFocusPosition,
+          controllers[0] || null,
+        )
+      } else {
+        syncProfessionalDefaultsFromController(controllers[0] || null)
+      }
       setRearTorchMode(flashMode, controllers[0] || null)
-      if (rearExposureBias !== 0) {
+      if (!proMode && rearExposureBias !== 0) {
         await applyExposureBias(
           'rear',
           rearExposureBias,
@@ -1028,7 +1355,7 @@ const DualCamera = () => {
           controllers[1] || null,
         )
       }
-      if (rearWhiteBalancePreset !== 'auto') {
+      if (!proMode && rearWhiteBalancePreset !== 'auto') {
         await applyWhiteBalancePreset(
           'rear',
           rearWhiteBalancePreset,
@@ -1150,7 +1477,8 @@ const DualCamera = () => {
           }),
         ),
       )
-      prependGalleryAssets(assets)
+      await markSavedGalleryAssets(assets, 'video')
+      prependGalleryAssets(assets.map(asset => ({ asset, kind: 'video' })))
     } catch (error) {
       console.warn('Stop dual video recording failed', error)
     } finally {
@@ -1179,15 +1507,21 @@ const DualCamera = () => {
     }
   }
 
-  const openMenuItem = (action: 'gallery' | 'settings' | 'pro') => {
+  const openMenuItem = (action: 'gallery' | 'settings') => {
     setPanel(null)
     if (action === 'gallery') openGallery()
     if (action === 'settings') setSettingsOpen(true)
-    if (action === 'pro') setProMode(value => !value)
   }
 
   const rearExposureRange = getExposureRange(rearCameraControllerRef.current)
   const frontExposureRange = getExposureRange(frontCameraControllerRef.current)
+  const professionalQuickPanelBottom = insets.bottom + 244
+  const professionalStripVisible =
+    proMode &&
+    (panel === null ||
+      panel === 'proQuickIso' ||
+      panel === 'proQuickShutter' ||
+      panel === 'proQuickFocus')
 
   return (
     <View style={styles.root}>
@@ -1270,14 +1604,77 @@ const DualCamera = () => {
           />
         )}
 
-        {proMode && (
-          <View style={styles.proPanel}>
-            {['ISO 自动', 'S 1/120', 'WB 自动', 'EV 0.0'].map(item => (
-              <View key={item} style={styles.proItem}>
-                <Text style={styles.proText}>{item}</Text>
-              </View>
-            ))}
-          </View>
+        {professionalStripVisible && (
+          <ProfessionalStatusStrip
+            bottom={insets.bottom + 196}
+            iso={proISO}
+            shutterDuration={proShutterDuration}
+            focusPosition={proFocusPosition}
+            onPressPro={() => setPanel('topMenuProfessional')}
+            onPressISO={() =>
+              setPanel(panel === 'proQuickIso' ? null : 'proQuickIso')
+            }
+            onPressShutter={() =>
+              setPanel(panel === 'proQuickShutter' ? null : 'proQuickShutter')
+            }
+            onPressFocus={() =>
+              setPanel(panel === 'proQuickFocus' ? null : 'proQuickFocus')
+            }
+          />
+        )}
+
+        {panel === 'proQuickIso' && (
+          <ProfessionalQuickAdjustPanel
+            bottom={professionalQuickPanelBottom}
+            mode="iso"
+            iso={proISO}
+            minISO={rearController?.minISO || 1}
+            maxISO={rearController?.maxISO || Math.max(1, proISO)}
+            shutterDuration={proShutterDuration}
+            shutterOptions={professionalShutterOptions}
+            focusPosition={proFocusPosition}
+            onPreviewISO={previewProfessionalISO}
+            onCommitISO={commitProfessionalISO}
+            onSelectShutter={selectProfessionalShutter}
+            onPreviewFocus={previewProfessionalFocusPosition}
+            onCommitFocus={commitProfessionalFocusPosition}
+          />
+        )}
+
+        {panel === 'proQuickShutter' && (
+          <ProfessionalQuickAdjustPanel
+            bottom={professionalQuickPanelBottom}
+            mode="shutter"
+            iso={proISO}
+            minISO={rearController?.minISO || 1}
+            maxISO={rearController?.maxISO || Math.max(1, proISO)}
+            shutterDuration={proShutterDuration}
+            shutterOptions={professionalShutterOptions}
+            focusPosition={proFocusPosition}
+            onPreviewISO={previewProfessionalISO}
+            onCommitISO={commitProfessionalISO}
+            onSelectShutter={selectProfessionalShutter}
+            onPreviewFocus={previewProfessionalFocusPosition}
+            onCommitFocus={commitProfessionalFocusPosition}
+          />
+        )}
+
+        {panel === 'proQuickFocus' && (
+          <ProfessionalQuickAdjustPanel
+            bottom={professionalQuickPanelBottom}
+            mode="focus"
+            iso={proISO}
+            minISO={rearController?.minISO || 1}
+            maxISO={rearController?.maxISO || Math.max(1, proISO)}
+            shutterDuration={proShutterDuration}
+            shutterOptions={professionalShutterOptions}
+            focusPosition={proFocusPosition}
+            onPreviewISO={previewProfessionalISO}
+            onCommitISO={commitProfessionalISO}
+            onSelectShutter={selectProfessionalShutter}
+            onPreviewFocus={previewProfessionalFocusPosition}
+            onCommitFocus={commitProfessionalFocusPosition}
+          />
         )}
 
         {bottomVisible && (
@@ -1314,13 +1711,67 @@ const DualCamera = () => {
           <MoreMenuPanel
             top={insets.top + 68}
             proMode={proMode}
-            showTopBar={showTopBar}
-            showBottomBar={showBottomBar}
+            onOpenProfessional={() => setPanel('topMenuProfessional')}
+            onOpenDisplay={() => setPanel('topMenuDisplay')}
+            onOpenFilter={() => setPanel('topMenuFilter')}
+            onOpenAi={() => setPanel('topMenuAi')}
             onOpenGallery={() => openMenuItem('gallery')}
             onOpenSettings={() => openMenuItem('settings')}
-            onToggleProMode={() => openMenuItem('pro')}
-            onToggleTopBar={setShowTopBar}
-            onToggleBottomBar={setShowBottomBar}
+          />
+        )}
+
+        {panel === 'topMenuProfessional' && (
+          <TopMenuProfessionalPanel
+            top={insets.top + 68}
+            enabled={proMode}
+            exposureSupported={supportsProfessionalExposure}
+            focusSupported={supportsProfessionalFocus}
+            iso={proISO}
+            minISO={rearController?.minISO || 1}
+            maxISO={rearController?.maxISO || Math.max(1, proISO)}
+            shutterDuration={proShutterDuration}
+            shutterOptions={professionalShutterOptions}
+            focusPosition={proFocusPosition}
+            onToggleEnabled={toggleProfessionalMode}
+            onPreviewISO={previewProfessionalISO}
+            onCommitISO={commitProfessionalISO}
+            onSelectShutter={selectProfessionalShutter}
+            onPreviewFocusPosition={previewProfessionalFocusPosition}
+            onCommitFocusPosition={commitProfessionalFocusPosition}
+            onBack={() => setPanel('menu')}
+            onClose={() => setPanel(null)}
+          />
+        )}
+
+        {panel === 'topMenuDisplay' && (
+          <TopMenuDisplayPanel
+            top={insets.top + 68}
+            showTopBar={showTopBar}
+            showBottomBar={showBottomBar}
+            onToggleTopBar={handleTopBarVisibilityChange}
+            onToggleBottomBar={handleBottomBarVisibilityChange}
+            onBack={() => setPanel('menu')}
+            onClose={() => setPanel(null)}
+          />
+        )}
+
+        {panel === 'topMenuFilter' && (
+          <TopMenuFilterPanel
+            top={insets.top + 68}
+            selectedFilterId={selectedFilterId}
+            selectedRenderQuality={filterRenderQuality}
+            onSelectFilter={setSelectedFilterId}
+            onSelectRenderQuality={setFilterRenderQuality}
+            onBack={() => setPanel('menu')}
+            onClose={() => setPanel(null)}
+          />
+        )}
+
+        {panel === 'topMenuAi' && (
+          <TopMenuAiEnhancePanel
+            top={insets.top + 68}
+            onBack={() => setPanel('menu')}
+            onClose={() => setPanel(null)}
           />
         )}
 
@@ -1402,7 +1853,6 @@ const DualCamera = () => {
         assets={galleryAssets}
         loading={galleryLoading}
         onClose={() => setGalleryOpen(false)}
-        onRefresh={loadGalleryAssets}
       />
       <SettingsDrawer
         visible={settingsOpen}
@@ -1452,27 +1902,6 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#fff',
   },
-  proPanel: {
-    position: 'absolute',
-    left: 16,
-    right: 16,
-    bottom: 178,
-    flexDirection: 'row',
-    gap: 8,
-    padding: 10,
-    borderRadius: 18,
-    backgroundColor: 'rgba(20,22,26,0.82)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  proItem: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 12,
-    alignItems: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  proText: { color: '#fff', fontSize: 12, fontWeight: '400' },
 })
 
 export default DualCamera

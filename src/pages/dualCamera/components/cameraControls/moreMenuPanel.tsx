@@ -1,52 +1,95 @@
 import React from 'react'
 import { StyleSheet } from 'react-native'
-import { GlassPanel, MenuItem, ToggleRow } from '../controls'
+import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { GlassPanel, MenuItem } from '../controls'
 
-// 更多菜单弹层组件：承载相册、设置、专业模式和工具栏显示开关。
+// 顶部更多菜单入口组件：只承载功能入口，不承载具体业务面板。
 export const MoreMenuPanel = ({
   top,
   proMode,
-  showTopBar,
-  showBottomBar,
+  onOpenProfessional,
+  onOpenDisplay,
+  onOpenFilter,
+  onOpenAi,
   onOpenGallery,
   onOpenSettings,
-  onToggleProMode,
-  onToggleTopBar,
-  onToggleBottomBar,
 }: {
   top: number
   proMode: boolean
-  showTopBar: boolean
-  showBottomBar: boolean
+  onOpenProfessional: () => void
+  onOpenDisplay: () => void
+  onOpenFilter: () => void
+  onOpenAi: () => void
   onOpenGallery: () => void
   onOpenSettings: () => void
-  onToggleProMode: () => void
-  onToggleTopBar: (value: boolean) => void
-  onToggleBottomBar: (value: boolean) => void
 }) => (
   <GlassPanel style={[styles.menuPanel, { top }]}>
-    <MenuItem icon="▧" label="相册" onPress={onOpenGallery} />
-    <MenuItem icon="⚙" label="设置" onPress={onOpenSettings} />
-    <MenuItem icon="◐" label="滤镜库" />
     <MenuItem
-      icon="▤"
-      label={proMode ? '退出专业模式' : '专业模式'}
-      onPress={onToggleProMode}
+      icon={
+        <MaterialIcons name="tune" color="rgba(255,255,255,0.9)" size={21} />
+      }
+      label="专业模式"
+      value={proMode ? '已开启' : undefined}
+      onPress={onOpenProfessional}
     />
-    <MenuItem icon="✦" label="AI增强" />
-    <ToggleRow
-      label="显示顶部工具栏"
-      value={showTopBar}
-      onValueChange={onToggleTopBar}
+    <MenuItem
+      icon={
+        <MaterialIcons
+          name="visibility"
+          color="rgba(255,255,255,0.9)"
+          size={21}
+        />
+      }
+      label="显示与界面"
+      onPress={onOpenDisplay}
     />
-    <ToggleRow
-      label="显示底部工具栏"
-      value={showBottomBar}
-      onValueChange={onToggleBottomBar}
+    <MenuItem
+      icon={
+        <MaterialIcons
+          name="gradient"
+          color="rgba(255,255,255,0.9)"
+          size={21}
+        />
+      }
+      label="滤镜库"
+      onPress={onOpenFilter}
+    />
+    <MenuItem
+      icon={
+        <MaterialIcons
+          name="auto-awesome"
+          color="rgba(255,255,255,0.9)"
+          size={21}
+        />
+      }
+      label="AI增强"
+      onPress={onOpenAi}
+    />
+    <MenuItem
+      icon={
+        <MaterialIcons
+          name="photo-library"
+          color="rgba(255,255,255,0.9)"
+          size={21}
+        />
+      }
+      label="相册"
+      onPress={onOpenGallery}
+    />
+    <MenuItem
+      icon={
+        <MaterialIcons
+          name="settings"
+          color="rgba(255,255,255,0.9)"
+          size={21}
+        />
+      }
+      label="设置"
+      onPress={onOpenSettings}
     />
   </GlassPanel>
 )
 
 const styles = StyleSheet.create({
-  menuPanel: { right: 18, width: 220 },
+  menuPanel: { right: 18, width: 236 },
 })

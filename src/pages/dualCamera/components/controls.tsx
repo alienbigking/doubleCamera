@@ -1,5 +1,11 @@
 import React from 'react'
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native'
 import type { StyleProp, ViewStyle } from 'react-native'
 
 export const GlassPanel = ({
@@ -8,15 +14,24 @@ export const GlassPanel = ({
 }: {
   children: React.ReactNode
   style?: StyleProp<ViewStyle>
-}) => <View style={[styles.glassPanel, style]}>{children}</View>
+}) => (
+  <Pressable
+    style={[styles.glassPanel, style]}
+    onPress={event => event.stopPropagation()}
+  >
+    {children}
+  </Pressable>
+)
 
 export const MenuItem = ({
   icon,
   label,
+  value,
   onPress,
 }: {
-  icon: string
+  icon?: React.ReactNode
   label: string
+  value?: string
   onPress?: () => void
 }) => (
   <TouchableOpacity
@@ -24,17 +39,26 @@ export const MenuItem = ({
     activeOpacity={0.75}
     onPress={onPress}
   >
-    <Text style={styles.menuIcon}>{icon}</Text>
+    <View style={styles.menuIconSlot}>
+      {typeof icon === 'string' ? (
+        <Text style={styles.menuIcon}>{icon}</Text>
+      ) : (
+        icon
+      )}
+    </View>
     <Text style={styles.menuLabel}>{label}</Text>
+    {value ? <Text style={styles.menuValue}>{value}</Text> : null}
     <Text style={styles.menuArrow}>›</Text>
   </TouchableOpacity>
 )
 
 export const ToggleRow = ({
+  icon,
   label,
   value,
   onValueChange,
 }: {
+  icon?: React.ReactNode
   label: string
   value: boolean
   onValueChange: (value: boolean) => void
@@ -44,7 +68,9 @@ export const ToggleRow = ({
     activeOpacity={0.75}
     onPress={() => onValueChange(!value)}
   >
-    <Text style={styles.menuIcon}>{value ? '●' : '○'}</Text>
+    <View style={styles.menuIconSlot}>
+      {icon || <Text style={styles.menuIcon}>{value ? '●' : '○'}</Text>}
+    </View>
     <Text style={styles.menuLabel}>{label}</Text>
     <View style={[styles.switchTrack, value && styles.switchTrackActive]}>
       <View style={[styles.switchKnob, value && styles.switchKnobActive]} />
@@ -98,6 +124,8 @@ export const ModeButton = ({
 const styles = StyleSheet.create({
   glassPanel: {
     position: 'absolute',
+    zIndex: 40,
+    elevation: 24,
     borderRadius: 22,
     padding: 12,
     backgroundColor: 'rgba(22,24,27,0.86)',
@@ -112,13 +140,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
-  menuIcon: {
+  menuIconSlot: {
     width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  menuIcon: {
     color: 'rgba(255,255,255,0.84)',
     fontSize: 20,
     textAlign: 'center',
   },
   menuLabel: { flex: 1, color: '#fff', fontSize: 16, fontWeight: '400' },
+  menuValue: {
+    color: '#58e8ff',
+    fontSize: 12,
+    fontWeight: '400',
+  },
   menuArrow: {
     color: 'rgba(255,255,255,0.78)',
     fontSize: 24,

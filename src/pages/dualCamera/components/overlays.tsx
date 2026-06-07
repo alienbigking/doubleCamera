@@ -1,12 +1,20 @@
-import React from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
+import { type GalleryAssetKind } from './galleryAssetIndex'
+import { CameraRoll } from '@react-native-camera-roll/camera-roll'
+import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import RNFS from 'react-native-fs'
+import Share from 'react-native-share'
+import { SafeAreaView } from 'react-native-safe-area-context'
+
 import {
   Image,
   Modal,
-  SafeAreaView,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native'
 
@@ -22,6 +30,84 @@ export type GalleryAsset = {
   uri: string
   type: string
   filename?: string
+  kind?: GalleryAssetKind
+}
+
+type GalleryFilter = 'all' | 'dualPhoto' | 'video'
+type GalleryViewMode = 'grid' | 'large'
+
+const galleryFilters: { id: GalleryFilter; label: string }[] = [
+  { id: 'all', label: '全部' },
+  { id: 'dualPhoto', label: '双摄照片' },
+  { id: 'video', label: '视频' },
+]
+
+const isVideoAsset = (asset: GalleryAsset) =>
+  asset.type.toLowerCase().includes('video')
+
+const getGalleryAssetLabel = (asset: GalleryAsset) => {
+  if (isVideoAsset(asset)) return '视频'
+  if (asset.kind === 'dualPhoto') return '双摄照片'
+  return '照片'
+}
+
+const normalizeFileUri = (uri: string) =>
+  uri.startsWith('/') ? `file://${uri}` : uri
+
+const stripFileUriPrefix = (uri: string) =>
+  decodeURIComponent(uri.replace(/^file:\/\//, ''))
+
+const sanitizeFileName = (fileName: string) =>
+  fileName.replace(/[^\w.-]+/g, '_')
+
+const getAssetExtension = (asset: GalleryAsset) => {
+  const fileNameExtension = asset.filename?.match(/\.([a-zA-Z0-9]+)$/)?.[1]
+  if (fileNameExtension) return fileNameExtension.toLowerCase()
+  return isVideoAsset(asset) ? 'mp4' : 'jpg'
+}
+
+const getAssetMimeType = (asset: GalleryAsset) =>
+  isVideoAsset(asset) ? 'video/mp4' : 'image/jpeg'
+
+const getShareFileName = (asset: GalleryAsset, index: number) => {
+  const extension = getAssetExtension(asset)
+  const fileName = asset.filename
+    ? sanitizeFileName(asset.filename)
+    : `dualcam-${Date.now()}-${index}.${extension}`
+
+  return fileName.includes('.') ? fileName : `${fileName}.${extension}`
+}
+
+const getAssetLocalUri = async (asset: GalleryAsset) => {
+  if (Platform.OS !== 'ios' || !asset.uri.startsWith('ph://')) {
+    return normalizeFileUri(asset.uri)
+  }
+
+  const result = await CameraRoll.iosGetImageDataById(asset.id, {
+    convertHeicImages: true,
+    quality: 1,
+  })
+  return normalizeFileUri(result.node.image.filepath || result.node.image.uri)
+}
+
+const prepareShareableAssetFile = async (
+  asset: GalleryAsset,
+  index: number,
+) => {
+  const localUri = await getAssetLocalUri(asset)
+  const fileName = getShareFileName(asset, index)
+  const sourcePath = stripFileUriPrefix(localUri)
+  const destinationPath = `${
+    RNFS.CachesDirectoryPath
+  }/${Date.now()}-${index}-${fileName}`
+
+  await RNFS.copyFile(sourcePath, destinationPath)
+
+  return {
+    url: `file://${destinationPath}`,
+    filename: fileName,
+    mimeType: getAssetMimeType(asset),
+  }
 }
 
 export const CapturePreview = ({
@@ -71,55 +157,256 @@ export const GalleryModal = ({
   assets,
   loading,
   onClose,
-  onRefresh,
 }: {
   visible: boolean
   assets: GalleryAsset[]
   loading: boolean
   onClose: () => void
-  onRefresh: () => void
-}) => (
-  <Modal visible={visible} animationType="slide">
-    <SafeAreaView style={styles.galleryRoot}>
-      <View style={styles.modalHeader}>
-        <Text style={styles.modalTitle}>相册</Text>
-        <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
-          <Text style={styles.iconText}>×</Text>
-        </TouchableOpacity>
-      </View>
-      <View style={styles.filterTabs}>
-        {['全部', '双摄照片', '视频'].map(item => (
-          <View key={item} style={styles.filterTab}>
-            <Text style={styles.filterText}>{item}</Text>
-          </View>
-        ))}
-        <TouchableOpacity style={styles.filterTab} onPress={onRefresh}>
-          <Text style={styles.filterText}>刷新</Text>
-        </TouchableOpacity>
-      </View>
-      {loading ? (
-        <View style={styles.emptyGallery}>
-          <Text style={styles.emptyText}>正在读取相册</Text>
+}) => {
+  const { width: windowWidth } = useWindowDimensions()
+  const [filter, setFilter] = useState<GalleryFilter>('all')
+  const [viewMode, setViewMode] = useState<GalleryViewMode>('grid')
+  const [selectedAssetIds, setSelectedAssetIds] = useState<string[]>([])
+  const [sharing, setSharing] = useState(false)
+
+  const filteredAssets = useMemo(
+    () =>
+      assets.filter(asset => {
+        const isVideo = isVideoAsset(asset)
+        if (filter === 'video') return isVideo
+        if (filter === 'dualPhoto') return asset.kind === 'dualPhoto'
+        return true
+      }),
+    [assets, filter],
+  )
+
+  useEffect(() => {
+    if (!visible) {
+      setSelectedAssetIds([])
+      setSharing(false)
+    }
+  }, [visible])
+
+  useEffect(() => {
+    const visibleAssetIds = new Set(filteredAssets.map(asset => asset.id))
+    setSelectedAssetIds(previous =>
+      previous.filter(id => visibleAssetIds.has(id)),
+    )
+  }, [filteredAssets])
+
+  const selectedAssets = useMemo(
+    () => filteredAssets.filter(asset => selectedAssetIds.includes(asset.id)),
+    [filteredAssets, selectedAssetIds],
+  )
+
+  const selectedCount = selectedAssetIds.length
+  const hasSelectedAssets = selectedCount > 0
+
+  const toggleSelectedAsset = (assetId: string) => {
+    setSelectedAssetIds(previous =>
+      previous.includes(assetId)
+        ? previous.filter(id => id !== assetId)
+        : [...previous, assetId],
+    )
+  }
+
+  const toggleViewMode = () => {
+    setViewMode(previous => (previous === 'grid' ? 'large' : 'grid'))
+  }
+
+  const renderSelectedOverlay = (assetId: string) =>
+    selectedAssetIds.includes(assetId) ? (
+      <View style={styles.selectedOverlay}>
+        <View style={styles.selectedCheck}>
+          <Text style={styles.selectedCheckText}>✓</Text>
         </View>
-      ) : assets.length === 0 ? (
-        <View style={styles.emptyGallery}>
-          <Text style={styles.emptyText}>暂无照片</Text>
-        </View>
-      ) : (
-        <ScrollView contentContainerStyle={styles.galleryGrid}>
-          {assets.map(asset => (
-            <View key={asset.id} style={styles.galleryTile}>
-              <Image source={{ uri: asset.uri }} style={styles.galleryImage} />
-              <Text style={styles.dualBadge}>
-                {asset.type.includes('video') ? '视频' : '照片'}
+      </View>
+    ) : null
+
+  const shareSelectedAssets = async () => {
+    if (selectedAssets.length === 0 || sharing) return
+
+    try {
+      setSharing(true)
+      const shareableFiles = await Promise.all(
+        selectedAssets.map((asset, index) =>
+          prepareShareableAssetFile(asset, index),
+        ),
+      )
+      const shareType = shareableFiles.every(
+        file => file.mimeType === shareableFiles[0].mimeType,
+      )
+        ? shareableFiles[0].mimeType
+        : 'application/octet-stream'
+      await Share.open(
+        shareableFiles.length === 1
+          ? {
+              url: shareableFiles[0].url,
+              filename: shareableFiles[0].filename,
+              type: shareType,
+              failOnCancel: false,
+            }
+          : {
+              urls: shareableFiles.map(file => file.url),
+              filenames: shareableFiles.map(file => file.filename),
+              type: shareType,
+              failOnCancel: false,
+            },
+      )
+    } catch (error) {
+      console.warn('Share gallery assets failed', error)
+    } finally {
+      setSharing(false)
+    }
+  }
+
+  const emptyText =
+    filter === 'video'
+      ? '暂无视频'
+      : filter === 'dualPhoto'
+      ? '暂无双摄照片'
+      : '暂无照片'
+
+  return (
+    <Modal visible={visible} animationType="slide">
+      <SafeAreaView style={styles.galleryRoot}>
+        <View style={styles.modalHeader}>
+          <View>
+            <Text style={styles.modalTitle}>相册</Text>
+            {hasSelectedAssets && (
+              <Text style={styles.selectionHint}>
+                已选择 {selectedCount} 项
               </Text>
+            )}
+          </View>
+          {hasSelectedAssets ? (
+            <View style={styles.galleryHeaderActions}>
+              <TouchableOpacity
+                style={styles.galleryHeaderButton}
+                onPress={() => setSelectedAssetIds([])}
+              >
+                <Text style={styles.galleryHeaderButtonText}>取消</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.shareButton,
+                  sharing && styles.shareButtonDisabled,
+                ]}
+                activeOpacity={0.84}
+                onPress={shareSelectedAssets}
+                disabled={sharing}
+              >
+                <Text style={styles.shareButtonText}>
+                  {sharing ? '分享中' : '分享'}
+                </Text>
+              </TouchableOpacity>
             </View>
-          ))}
-        </ScrollView>
-      )}
-    </SafeAreaView>
-  </Modal>
-)
+          ) : (
+            <View style={styles.galleryHeaderActions}>
+              <TouchableOpacity
+                style={styles.galleryIconButton}
+                activeOpacity={0.84}
+                onPress={toggleViewMode}
+              >
+                <MaterialIcons
+                  name={viewMode === 'grid' ? 'view-agenda' : 'grid-view'}
+                  color="rgba(255,255,255,0.9)"
+                  size={23}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
+                <Text style={styles.iconText}>×</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+        <View style={styles.filterTabs}>
+          {galleryFilters.map(item => {
+            const active = filter === item.id
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.filterTab, active && styles.filterTabActive]}
+                activeOpacity={0.82}
+                onPress={() => setFilter(item.id)}
+              >
+                <Text
+                  style={[styles.filterText, active && styles.filterTextActive]}
+                >
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            )
+          })}
+        </View>
+        {loading ? (
+          <View style={styles.emptyGallery}>
+            <Text style={styles.emptyText}>正在读取相册</Text>
+          </View>
+        ) : filteredAssets.length === 0 ? (
+          <View style={styles.emptyGallery}>
+            <Text style={styles.emptyText}>{emptyText}</Text>
+          </View>
+        ) : viewMode === 'grid' ? (
+          <ScrollView contentContainerStyle={styles.galleryGrid}>
+            {filteredAssets.map(asset => (
+              <TouchableOpacity
+                key={asset.id}
+                style={styles.galleryTile}
+                activeOpacity={0.86}
+                onPress={() => toggleSelectedAsset(asset.id)}
+              >
+                <Image
+                  source={{ uri: asset.uri }}
+                  style={styles.galleryImage}
+                />
+                <Text style={styles.dualBadge}>
+                  {getGalleryAssetLabel(asset)}
+                </Text>
+                {renderSelectedOverlay(asset.id)}
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <ScrollView
+            horizontal
+            pagingEnabled
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.galleryLargePager}
+          >
+            {filteredAssets.map(asset => (
+              <TouchableOpacity
+                key={asset.id}
+                style={[styles.galleryLargePage, { width: windowWidth }]}
+                activeOpacity={0.9}
+                onPress={() => toggleSelectedAsset(asset.id)}
+              >
+                <View style={styles.galleryLargeItem}>
+                  <Image
+                    source={{ uri: asset.uri }}
+                    style={styles.galleryLargeImage}
+                    resizeMode="cover"
+                  />
+                  <View style={styles.largeMetaBar}>
+                    <Text style={styles.largeMetaText}>
+                      {getGalleryAssetLabel(asset)}
+                    </Text>
+                    {asset.filename && (
+                      <Text style={styles.largeFileName} numberOfLines={1}>
+                        {asset.filename}
+                      </Text>
+                    )}
+                  </View>
+                  {renderSelectedOverlay(asset.id)}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        )}
+      </SafeAreaView>
+    </Modal>
+  )
+}
 
 export const SettingsDrawer = ({
   visible,
@@ -255,6 +542,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.12)',
   },
   modalTitle: { color: '#fff', fontSize: 24, fontWeight: '400' },
+  selectionHint: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 12,
+    fontWeight: '400',
+    marginTop: 4,
+  },
   captureMeta: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
@@ -337,6 +630,48 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
+  galleryHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  galleryHeaderButton: {
+    minWidth: 58,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  galleryHeaderButtonText: {
+    color: 'rgba(255,255,255,0.86)',
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  galleryIconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  shareButton: {
+    minWidth: 66,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.24)',
+  },
+  shareButtonDisabled: {
+    opacity: 0.58,
+  },
+  shareButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '400',
+  },
   filterTabs: {
     flexDirection: 'row',
     gap: 8,
@@ -349,10 +684,16 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.1)',
   },
+  filterTabActive: {
+    backgroundColor: 'rgba(255,255,255,0.24)',
+  },
   filterText: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 13,
     fontWeight: '400',
+  },
+  filterTextActive: {
+    color: '#fff',
   },
   emptyGallery: {
     flex: 1,
@@ -371,6 +712,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     paddingBottom: 24,
   },
+  galleryLargePager: {
+    flexGrow: 1,
+  },
   galleryTile: {
     width: '32.6%',
     aspectRatio: 1,
@@ -379,6 +723,63 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   galleryImage: { width: '100%', height: '100%' },
+  galleryLargePage: {
+    flex: 1,
+    paddingBottom: 18,
+  },
+  galleryLargeItem: {
+    flex: 1,
+    backgroundColor: '#050607',
+    position: 'relative',
+  },
+  galleryLargeImage: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: '#050607',
+  },
+  largeMetaBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 46,
+    paddingHorizontal: 13,
+    paddingVertical: 9,
+    backgroundColor: 'rgba(0,0,0,0.48)',
+  },
+  largeMetaText: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '400',
+  },
+  largeFileName: {
+    color: 'rgba(255,255,255,0.58)',
+    fontSize: 11,
+    fontWeight: '400',
+    marginTop: 3,
+  },
+  selectedOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.34)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.88)',
+  },
+  selectedCheck: {
+    position: 'absolute',
+    top: 7,
+    right: 7,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+  },
+  selectedCheckText: {
+    color: '#08090c',
+    fontSize: 15,
+    fontWeight: '400',
+  },
   dualBadge: {
     position: 'absolute',
     right: 6,

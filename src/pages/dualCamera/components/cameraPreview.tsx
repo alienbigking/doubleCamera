@@ -107,25 +107,53 @@ export const CameraPreviewSurface = ({
   style?: StyleProp<ViewStyle>
 }) => {
   if (!previewOutput) {
-    return <CameraTexture compact={compact} />
+    return (
+      <View
+        style={[
+          styles.previewSurface,
+          compact && styles.previewSurfaceCompact,
+          style,
+        ]}
+      >
+        <View
+          style={[styles.previewMedia, compact && styles.previewMediaCompact]}
+        >
+          <CameraTexture compact={compact} />
+        </View>
+      </View>
+    )
   }
 
   return (
-    <NativePreviewView
+    <View
       style={[
-        styles.nativePreview,
-        compact && styles.nativePreviewCompact,
+        styles.previewSurface,
+        compact && styles.previewSurfaceCompact,
         style,
       ]}
-      previewOutput={previewOutput}
-      resizeMode="cover"
-      implementationMode="compatible"
-    />
+    >
+      <View
+        style={[styles.previewMedia, compact && styles.previewMediaCompact]}
+      >
+        <NativePreviewView
+          style={[styles.nativePreview, compact && styles.nativePreviewCompact]}
+          previewOutput={previewOutput}
+          resizeMode="cover"
+          implementationMode="compatible"
+        />
+      </View>
+    </View>
   )
 }
 
-const CameraTexture = ({ compact }: { compact?: boolean }) => (
-  <View style={[styles.texture, compact && styles.textureCompact]}>
+const CameraTexture = ({
+  compact,
+  style,
+}: {
+  compact?: boolean
+  style?: StyleProp<ViewStyle>
+}) => (
+  <View style={[styles.texture, compact && styles.textureCompact, style]}>
     <View style={styles.neonLine} />
     <View style={[styles.neonLine, styles.neonLineTwo]} />
     <View style={styles.lightBand} />
@@ -155,6 +183,10 @@ const styles = StyleSheet.create({
     width: '100%',
     maxHeight: '100%',
   },
+  previewSurface: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
+  previewSurfaceCompact: { borderRadius: compactCornerRadius },
+  previewMedia: { ...StyleSheet.absoluteFillObject, overflow: 'hidden' },
+  previewMediaCompact: { borderRadius: compactCornerRadius },
   nativePreview: { ...StyleSheet.absoluteFillObject, backgroundColor: '#000' },
   nativePreviewCompact: { borderRadius: compactCornerRadius },
   texture: { ...StyleSheet.absoluteFillObject, backgroundColor: '#06090a' },
