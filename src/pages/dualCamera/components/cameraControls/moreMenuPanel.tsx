@@ -11,6 +11,7 @@ export const MoreMenuPanel = ({
   onOpenDisplay,
   onOpenFilter,
   onOpenAi,
+  onOpenSkiaTest,
   onOpenGallery,
   onOpenSettings,
 }: {
@@ -20,6 +21,7 @@ export const MoreMenuPanel = ({
   onOpenDisplay: () => void
   onOpenFilter: () => void
   onOpenAi: () => void
+  onOpenSkiaTest: () => void
   onOpenGallery: () => void
   onOpenSettings: () => void
 }) => (
@@ -64,6 +66,13 @@ export const MoreMenuPanel = ({
       }
       label="AI增强"
       onPress={onOpenAi}
+    />
+    <MenuItem
+      icon={
+        <MaterialIcons name="science" color="rgba(255,255,255,0.9)" size={21} />
+      }
+      label="Skia 测试"
+      onPress={onOpenSkiaTest}
     />
     <MenuItem
       icon={

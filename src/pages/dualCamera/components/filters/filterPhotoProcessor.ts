@@ -1,6 +1,5 @@
 import RNFS from 'react-native-fs'
 import {
-  BlendMode,
   ImageFormat,
   Skia,
   type SkCanvas,
@@ -15,6 +14,7 @@ import {
   getDualCameraFilterRenderQualityPreset,
   type DualCameraFilterRenderQuality,
 } from './filterRenderQualityPresets'
+import { blendModeMap, toColorWithOpacity } from './filterRenderingUtils'
 
 const stripFileScheme = (uri: string) =>
   uri.startsWith('file://') ? uri.replace('file://', '') : uri
@@ -86,52 +86,6 @@ const coverSourceRect = (image: SkImage, dest: SkRect) => {
   )
 }
 
-const blendModeMap: Record<
-  NonNullable<
-    ReturnType<typeof getDualCameraFilterPreset>['photoBlend']
-  >['mode'],
-  BlendMode
-> = {
-  overlay: BlendMode.Overlay,
-  softLight: BlendMode.SoftLight,
-  screen: BlendMode.Screen,
-  multiply: BlendMode.Multiply,
-}
-
-const toColorWithOpacity = (color: string, opacity: number) => {
-  if (color.startsWith('#')) {
-    const hex = color.slice(1)
-
-    if (hex.length === 3) {
-      const [r, g, b] = hex.split('')
-      return `rgba(${parseInt(r + r, 16)}, ${parseInt(g + g, 16)}, ${parseInt(
-        b + b,
-        16,
-      )}, ${opacity})`
-    }
-
-    if (hex.length === 6) {
-      return `rgba(${parseInt(hex.slice(0, 2), 16)}, ${parseInt(
-        hex.slice(2, 4),
-        16,
-      )}, ${parseInt(hex.slice(4, 6), 16)}, ${opacity})`
-    }
-  }
-
-  if (color.startsWith('rgb(')) {
-    return color.replace(/^rgb\((.+)\)$/, `rgba($1, ${opacity})`)
-  }
-
-  if (color.startsWith('rgba(')) {
-    return color.replace(
-      /^rgba\(([^,]+),([^,]+),([^,]+),[^)]+\)$/,
-      (_, red, green, blue) => `rgba(${red},${green},${blue},${opacity})`,
-    )
-  }
-
-  return color
-}
-
 export const drawFilteredImageRect = ({
   canvas,
   image,
@@ -181,29 +135,42 @@ export const applyFilterToPhoto = async (
   }
 
   const image = await loadImage(uri)
-  const size = fitCanvasSize(image, renderQuality)
-  const surface = Skia.Surface.MakeOffscreen(size.width, size.height)
 
-  if (!surface) {
-    throw new Error('Failed to create Skia surface for filter output')
+  try {
+    const size = fitCanvasSize(image, renderQuality)
+    const surface = Skia.Surface.MakeOffscreen(size.width, size.height)
+
+    if (!surface) {
+      throw new Error('Failed to create Skia surface for filter output')
+    }
+
+    let snapshot: SkImage | undefined
+
+    try {
+      const canvas = surface.getCanvas()
+      const destRect = Skia.XYWHRect(0, 0, size.width, size.height)
+      canvas.clear(Skia.Color('#000000'))
+      drawFilteredImageRect({
+        canvas,
+        image,
+        destRect,
+        filterId,
+      })
+
+      surface.flush()
+      snapshot = surface.makeImageSnapshot()
+      const { jpegQuality } =
+        getDualCameraFilterRenderQualityPreset(renderQuality)
+      const base64 = snapshot.encodeToBase64(ImageFormat.JPEG, jpegQuality)
+      const outputPath = createOutputPath(filterId)
+      await RNFS.writeFile(outputPath, base64, 'base64')
+
+      return `file://${outputPath}`
+    } finally {
+      snapshot?.dispose()
+      surface.dispose()
+    }
+  } finally {
+    image.dispose()
   }
-
-  const canvas = surface.getCanvas()
-  const destRect = Skia.XYWHRect(0, 0, size.width, size.height)
-  canvas.clear(Skia.Color('#000000'))
-  drawFilteredImageRect({
-    canvas,
-    image,
-    destRect,
-    filterId,
-  })
-
-  surface.flush()
-  const snapshot = surface.makeImageSnapshot()
-  const { jpegQuality } = getDualCameraFilterRenderQualityPreset(renderQuality)
-  const base64 = snapshot.encodeToBase64(ImageFormat.JPEG, jpegQuality)
-  const outputPath = createOutputPath(filterId)
-  await RNFS.writeFile(outputPath, base64, 'base64')
-
-  return `file://${outputPath}`
 }

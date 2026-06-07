@@ -93,98 +93,124 @@ export const composeDualPhoto = async ({
     primaryCamera === 'rear' ? 'front' : 'rear'
   const primaryImage = await loadImage(photos[primaryCamera])
   const secondaryImage = await loadImage(photos[secondaryCamera])
-  const canvasSize =
-    layout === 'split'
-      ? {
-          width: fitCanvasSize(primaryImage, renderQuality).width,
-          height: Math.round(
-            (fitCanvasSize(primaryImage, renderQuality).width * 4) / 3,
-          ),
-        }
-      : fitCanvasSize(primaryImage, renderQuality)
-  const surface = Skia.Surface.MakeOffscreen(
-    canvasSize.width,
-    canvasSize.height,
-  )
 
-  if (!surface) {
-    throw new Error('Failed to create Skia offscreen surface')
-  }
-
-  const canvas = surface.getCanvas()
-  canvas.clear(Skia.Color('#000000'))
-
-  if (layout === 'split') {
-    const topRect = Skia.XYWHRect(0, 0, canvasSize.width, canvasSize.height / 2)
-    const bottomRect = Skia.XYWHRect(
-      0,
-      canvasSize.height / 2,
+  try {
+    const fittedPrimarySize = fitCanvasSize(primaryImage, renderQuality)
+    const canvasSize =
+      layout === 'split'
+        ? {
+            width: fittedPrimarySize.width,
+            height: Math.round((fittedPrimarySize.width * 4) / 3),
+          }
+        : fittedPrimarySize
+    const surface = Skia.Surface.MakeOffscreen(
       canvasSize.width,
-      canvasSize.height / 2,
+      canvasSize.height,
     )
-    const topImage = primaryImage
-    const bottomImage = secondaryImage
-    drawFilteredImageRect({
-      canvas,
-      image: topImage,
-      destRect: topRect,
-      filterId,
-    })
-    drawFilteredImageRect({
-      canvas,
-      image: bottomImage,
-      destRect: bottomRect,
-      filterId,
-    })
-  } else {
-    const mainRect = Skia.XYWHRect(0, 0, canvasSize.width, canvasSize.height)
-    drawFilteredImageRect({
-      canvas,
-      image: primaryImage,
-      destRect: mainRect,
-      filterId,
-    })
 
-    const scaleX = canvasSize.width / previewSize.width
-    const scaleY = canvasSize.height / previewSize.height
-    const insetRect = Skia.XYWHRect(
-      Math.max(12, pipPosition.x * scaleX),
-      Math.max(12, pipPosition.y * scaleY),
-      pipSize.width * scaleX,
-      pipSize.height * scaleY,
-    )
-    const insetRadius = Math.min(insetRect.width, insetRect.height) * 0.18
-    canvas.save()
-    canvas.clipRRect(
-      Skia.RRectXY(insetRect, insetRadius, insetRadius),
-      ClipOp.Intersect,
-      true,
-    )
-    drawFilteredImageRect({
-      canvas,
-      image: secondaryImage,
-      destRect: insetRect,
-      filterId,
-    })
-    canvas.restore()
+    if (!surface) {
+      throw new Error('Failed to create Skia offscreen surface')
+    }
 
-    const borderPaint = Skia.Paint()
-    borderPaint.setAntiAlias(true)
-    borderPaint.setStyle(PaintStyle.Stroke)
-    borderPaint.setStrokeWidth(Math.max(3, Math.min(scaleX, scaleY) * 3))
-    borderPaint.setColor(Skia.Color('rgba(255,255,255,0.42)'))
-    canvas.drawRRect(
-      Skia.RRectXY(insetRect, insetRadius, insetRadius),
-      borderPaint,
-    )
+    let snapshot:
+      | Awaited<ReturnType<typeof surface.makeImageSnapshot>>
+      | undefined
+
+    try {
+      const canvas = surface.getCanvas()
+      canvas.clear(Skia.Color('#000000'))
+
+      if (layout === 'split') {
+        const topRect = Skia.XYWHRect(
+          0,
+          0,
+          canvasSize.width,
+          canvasSize.height / 2,
+        )
+        const bottomRect = Skia.XYWHRect(
+          0,
+          canvasSize.height / 2,
+          canvasSize.width,
+          canvasSize.height / 2,
+        )
+        drawFilteredImageRect({
+          canvas,
+          image: primaryImage,
+          destRect: topRect,
+          filterId,
+        })
+        drawFilteredImageRect({
+          canvas,
+          image: secondaryImage,
+          destRect: bottomRect,
+          filterId,
+        })
+      } else {
+        const mainRect = Skia.XYWHRect(
+          0,
+          0,
+          canvasSize.width,
+          canvasSize.height,
+        )
+        drawFilteredImageRect({
+          canvas,
+          image: primaryImage,
+          destRect: mainRect,
+          filterId,
+        })
+
+        const scaleX = canvasSize.width / previewSize.width
+        const scaleY = canvasSize.height / previewSize.height
+        const insetRect = Skia.XYWHRect(
+          Math.max(12, pipPosition.x * scaleX),
+          Math.max(12, pipPosition.y * scaleY),
+          pipSize.width * scaleX,
+          pipSize.height * scaleY,
+        )
+        const insetRadius = Math.min(insetRect.width, insetRect.height) * 0.18
+        canvas.save()
+        canvas.clipRRect(
+          Skia.RRectXY(insetRect, insetRadius, insetRadius),
+          ClipOp.Intersect,
+          true,
+        )
+        drawFilteredImageRect({
+          canvas,
+          image: secondaryImage,
+          destRect: insetRect,
+          filterId,
+        })
+        canvas.restore()
+
+        const borderPaint = Skia.Paint()
+        borderPaint.setAntiAlias(true)
+        borderPaint.setStyle(PaintStyle.Stroke)
+        borderPaint.setStrokeWidth(Math.max(3, Math.min(scaleX, scaleY) * 3))
+        borderPaint.setColor(Skia.Color('rgba(255,255,255,0.42)'))
+        canvas.drawRRect(
+          Skia.RRectXY(insetRect, insetRadius, insetRadius),
+          borderPaint,
+        )
+      }
+
+      surface.flush()
+      snapshot = surface.makeImageSnapshot()
+      const { jpegQuality } =
+        getDualCameraFilterRenderQualityPreset(renderQuality)
+      const outputBase64 = snapshot.encodeToBase64(
+        ImageFormat.JPEG,
+        jpegQuality,
+      )
+      const outputPath = createOutputPath()
+      await RNFS.writeFile(outputPath, outputBase64, 'base64')
+
+      return `file://${outputPath}`
+    } finally {
+      snapshot?.dispose()
+      surface.dispose()
+    }
+  } finally {
+    primaryImage.dispose()
+    secondaryImage.dispose()
   }
-
-  surface.flush()
-  const snapshot = surface.makeImageSnapshot()
-  const { jpegQuality } = getDualCameraFilterRenderQualityPreset(renderQuality)
-  const outputBase64 = snapshot.encodeToBase64(ImageFormat.JPEG, jpegQuality)
-  const outputPath = createOutputPath()
-  await RNFS.writeFile(outputPath, outputBase64, 'base64')
-
-  return `file://${outputPath}`
 }

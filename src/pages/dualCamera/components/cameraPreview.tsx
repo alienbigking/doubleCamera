@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { type ReactNode } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import type { StyleProp, ViewStyle } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
@@ -23,6 +23,7 @@ export const CameraPane = ({
   full,
   secondary,
   previewOutput,
+  previewContent,
   statusText,
   ratio,
   focusLocked,
@@ -32,6 +33,7 @@ export const CameraPane = ({
   full?: boolean
   secondary?: boolean
   previewOutput?: CameraPreviewOutput
+  previewContent?: ReactNode
   statusText?: string
   ratio?: string
   focusLocked?: boolean
@@ -55,7 +57,9 @@ export const CameraPane = ({
             : styles.ratioViewportFull,
         ]}
       >
-        <CameraPreviewSurface previewOutput={previewOutput} />
+        {previewContent || (
+          <CameraPreviewSurface previewOutput={previewOutput} />
+        )}
         <View style={styles.gridOverlay}>
           <View style={styles.gridLineV} />
           <View style={[styles.gridLineV, { left: '66.66%' }]} />

@@ -5,6 +5,11 @@ module.exports = {
         android: null, // 禁用 Android 平台的依赖
       },
     },
+    '@sayem314/react-native-keep-awake': {
+      platforms: {
+        ios: null,
+      },
+    },
     // 'react-native-geolocation-service':{
     //     platforms: {
     //         android: null, // 禁用 Android 平台的依赖

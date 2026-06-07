@@ -11,11 +11,13 @@ import {
   View,
 } from 'react-native'
 import { CameraRoll } from '@react-native-camera-roll/camera-roll'
+import { useNavigation } from '@react-navigation/native'
 import {
   iosRequestAddOnlyGalleryPermission,
   iosRequestReadWriteGalleryPermission,
 } from '@react-native-camera-roll/camera-roll'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack'
 import {
   CommonResolutions,
   VisionCamera,
@@ -68,17 +70,26 @@ import {
   type DualCameraFilterRenderQuality,
 } from './filters'
 import {
+  RealtimeFilteredPreviewSurface,
+  useRealtimeFilteredFrameOutputs,
+} from './realtimeFilteredPreview'
+import {
   getGalleryAssetIndex,
   markGalleryAssets,
   type GalleryAssetKind,
 } from './galleryAssetIndex'
+import type { RootStackParamList } from '@/navigation/appNavigator'
 
 type CameraSide = 'rear' | 'front'
 type PreviewStatus = 'loading' | 'ready' | 'denied' | 'unavailable' | 'error'
+type CameraScreenNavigation = NativeStackNavigationProp<RootStackParamList>
 
 type PreviewOutputs = Partial<Record<CameraSide, CameraPreviewOutput>>
 type PhotoOutputs = Partial<Record<CameraSide, CameraPhotoOutput>>
 type VideoOutputs = Partial<Record<CameraSide, CameraVideoOutput>>
+type FrameOutputs = Partial<
+  Record<CameraSide, ReturnType<typeof VisionCamera.createFrameOutput>>
+>
 type Recorders = Partial<Record<CameraSide, Recorder>>
 type CameraPair = Record<CameraSide, CameraDevice>
 type Point = { x: number; y: number }
@@ -243,6 +254,7 @@ const requestGalleryReadPermission = async () => {
 
 const DualCamera = () => {
   const insets = useSafeAreaInsets()
+  const navigation = useNavigation<CameraScreenNavigation>()
   const [mode, setMode] = useState<CaptureMode>('photo')
   const [layout, setLayout] = useState<LayoutMode>('pip')
   const [panel, setPanel] = useState<Panel>(null)
@@ -313,6 +325,7 @@ const DualCamera = () => {
   const photoOutputsRef = useRef<PhotoOutputs>({})
   const previewOutputsRef = useRef<PreviewOutputs>({})
   const videoOutputsRef = useRef<VideoOutputs>({})
+  const frameOutputsRef = useRef<FrameOutputs>({})
   const recordersRef = useRef<Recorders>({})
   const recordingFinishedRef = useRef<Promise<RecordedVideo>[]>([])
   const captureFlashOpacity = useRef(new Animated.Value(0)).current
@@ -325,6 +338,18 @@ const DualCamera = () => {
   )
   const pipPositionRef = useRef(pipPosition)
   const pipDragStartRef = useRef(pipPosition)
+  const secondaryCamera: CameraSide =
+    primaryCamera === 'rear' ? 'front' : 'rear'
+  const isPip = layout === 'pip'
+  const realtimeFilterEnabled =
+    mode === 'photo' && selectedFilterId !== 'none' && !captureBusy
+  const {
+    frameOutputs: realtimeFilterFrameOutputs,
+    textures: realtimeTextures,
+  } = useRealtimeFilteredFrameOutputs({
+    enabled: realtimeFilterEnabled,
+    filterId: selectedFilterId,
+  })
 
   useEffect(() => {
     pipPositionRef.current = pipPosition
@@ -429,6 +454,8 @@ const DualCamera = () => {
 
         const rearPreviewOutput = VisionCamera.createPreviewOutput()
         const frontPreviewOutput = VisionCamera.createPreviewOutput()
+        const rearFrameOutput = realtimeFilterFrameOutputs.rear
+        const frontFrameOutput = realtimeFilterFrameOutputs.front
         const rearPhotoOutput = VisionCamera.createPhotoOutput({
           targetResolution: CommonResolutions.FHD_4_3,
           containerFormat: 'jpeg',
@@ -456,6 +483,7 @@ const DualCamera = () => {
             input: cameraPair.rear,
             outputs: [
               { output: rearPreviewOutput, mirrorMode: 'off' },
+              { output: rearFrameOutput, mirrorMode: 'off' },
               { output: rearPhotoOutput, mirrorMode: 'off' },
             ],
             constraints: [],
@@ -465,6 +493,7 @@ const DualCamera = () => {
             input: cameraPair.front,
             outputs: [
               { output: frontPreviewOutput, mirrorMode: 'on' },
+              { output: frontFrameOutput, mirrorMode: 'on' },
               { output: frontPhotoOutput, mirrorMode: 'off' },
             ],
             constraints: [],
@@ -482,6 +511,10 @@ const DualCamera = () => {
           previewOutputsRef.current = {
             rear: rearPreviewOutput,
             front: frontPreviewOutput,
+          }
+          frameOutputsRef.current = {
+            rear: rearFrameOutput,
+            front: frontFrameOutput,
           }
           photoOutputsRef.current = {
             rear: rearPhotoOutput,
@@ -532,6 +565,7 @@ const DualCamera = () => {
       previewOutputsRef.current = {}
       photoOutputsRef.current = {}
       videoOutputsRef.current = {}
+      frameOutputsRef.current = {}
       recordersRef.current = {}
       recordingFinishedRef.current = []
 
@@ -541,7 +575,7 @@ const DualCamera = () => {
         session.stop().catch(() => undefined)
       }
     }
-  }, [])
+  }, [realtimeFilterFrameOutputs])
 
   useEffect(() => {
     if (!recording) return
@@ -550,10 +584,6 @@ const DualCamera = () => {
     }, 1000)
     return () => clearInterval(timer)
   }, [recording])
-
-  const secondaryCamera: CameraSide =
-    primaryCamera === 'rear' ? 'front' : 'rear'
-  const isPip = layout === 'pip'
   const layoutLabel = layout === 'pip' ? '画中画' : '上下分屏'
   const primaryLabel = primaryCamera === 'rear' ? '后置主画面' : '前置主画面'
   const secondaryLabel = secondaryCamera === 'rear' ? '后置预览' : '前置预览'
@@ -1236,8 +1266,6 @@ const DualCamera = () => {
         capturedAt: new Date().toLocaleString(),
       }
 
-      setCaptureBusy(false)
-
       if (photoSaveMode === 'combined') {
         await saveCombinedPhoto(photos)
       } else if (photoSaveMode === 'separate') {
@@ -1246,6 +1274,7 @@ const DualCamera = () => {
         await saveCombinedAndSeparatePhotos(photos)
       }
       showSaveFeedback('saved')
+      setCaptureBusy(false)
     } catch (error) {
       console.warn('Dual camera capture failed', error)
       showSaveFeedback(null)
@@ -1513,6 +1542,11 @@ const DualCamera = () => {
     if (action === 'settings') setSettingsOpen(true)
   }
 
+  const openSkiaTest = () => {
+    setPanel(null)
+    navigation.navigate('SkiaFilterTest')
+  }
+
   const rearExposureRange = getExposureRange(rearCameraControllerRef.current)
   const frontExposureRange = getExposureRange(frontCameraControllerRef.current)
   const professionalQuickPanelBottom = insets.bottom + 244
@@ -1522,6 +1556,15 @@ const DualCamera = () => {
       panel === 'proQuickIso' ||
       panel === 'proQuickShutter' ||
       panel === 'proQuickFocus')
+  const getRealtimePreviewContent = (side: CameraSide) =>
+    realtimeFilterEnabled ? (
+      <RealtimeFilteredPreviewSurface
+        previewOutput={previewOutputs[side]}
+        texture={realtimeTextures[side]}
+      />
+    ) : undefined
+  const primaryPreviewContent = getRealtimePreviewContent(primaryCamera)
+  const secondaryPreviewContent = getRealtimePreviewContent(secondaryCamera)
 
   return (
     <View style={styles.root}>
@@ -1531,6 +1574,7 @@ const DualCamera = () => {
             <CameraPane
               label={primaryLabel}
               previewOutput={previewOutputs[primaryCamera]}
+              previewContent={primaryPreviewContent}
               statusText={previewStatusText}
               ratio={ratio}
               focusLocked={focusLocked}
@@ -1540,6 +1584,7 @@ const DualCamera = () => {
             <CameraPane
               label={secondaryLabel}
               previewOutput={previewOutputs[secondaryCamera]}
+              previewContent={secondaryPreviewContent}
               statusText={previewStatusText}
               ratio={ratio}
               secondary
@@ -1549,6 +1594,7 @@ const DualCamera = () => {
           <CameraPane
             label={primaryLabel}
             previewOutput={previewOutputs[primaryCamera]}
+            previewContent={primaryPreviewContent}
             statusText={previewStatusText}
             ratio={ratio}
             focusLocked={focusLocked}
@@ -1569,11 +1615,18 @@ const DualCamera = () => {
             {...pipPanResponder.panHandlers}
           >
             <View style={styles.pipInner}>
-              <CameraPreviewSurface
-                previewOutput={previewOutputs[secondaryCamera]}
-                compact
-                style={styles.pipPreviewSurface}
-              />
+              {secondaryPreviewContent ? (
+                <RealtimeFilteredPreviewSurface
+                  previewOutput={previewOutputs[secondaryCamera]}
+                  texture={realtimeTextures[secondaryCamera]}
+                />
+              ) : (
+                <CameraPreviewSurface
+                  previewOutput={previewOutputs[secondaryCamera]}
+                  compact
+                  style={styles.pipPreviewSurface}
+                />
+              )}
               <Text style={styles.pipLabel}>{secondaryLabel}</Text>
             </View>
           </View>
@@ -1715,6 +1768,7 @@ const DualCamera = () => {
             onOpenDisplay={() => setPanel('topMenuDisplay')}
             onOpenFilter={() => setPanel('topMenuFilter')}
             onOpenAi={() => setPanel('topMenuAi')}
+            onOpenSkiaTest={openSkiaTest}
             onOpenGallery={() => openMenuItem('gallery')}
             onOpenSettings={() => openMenuItem('settings')}
           />
