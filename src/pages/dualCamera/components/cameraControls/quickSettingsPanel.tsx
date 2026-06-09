@@ -1,6 +1,10 @@
 import React from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { GlassPanel, SettingLine } from '../controls'
+import {
+  dualCameraFilterRenderQualityPresets,
+  type DualCameraFilterRenderQuality,
+} from '../filters'
 import type {
   CaptureTimerMode,
   PhotoSaveMode,
@@ -19,6 +23,7 @@ export const QuickSettingsPanel = ({
   ratio,
   captureTimerMode,
   photoSaveMode,
+  filterRenderQuality,
   focusLocked,
   rearExposure,
   frontExposure,
@@ -27,6 +32,7 @@ export const QuickSettingsPanel = ({
   onChangeRatio,
   onToggleCaptureTimer,
   onChangePhotoSaveMode,
+  onChangeFilterRenderQuality,
   onToggleFocusLock,
   onOpenExposurePanel,
   onOpenWhiteBalancePanel,
@@ -35,6 +41,7 @@ export const QuickSettingsPanel = ({
   ratio: string
   captureTimerMode: CaptureTimerMode
   photoSaveMode: PhotoSaveMode
+  filterRenderQuality: DualCameraFilterRenderQuality
   focusLocked: boolean
   rearExposure: number
   frontExposure: number
@@ -43,6 +50,7 @@ export const QuickSettingsPanel = ({
   onChangeRatio: (ratio: string) => void
   onToggleCaptureTimer: () => void
   onChangePhotoSaveMode: (mode: PhotoSaveMode) => void
+  onChangeFilterRenderQuality: (quality: DualCameraFilterRenderQuality) => void
   onToggleFocusLock: () => void
   onOpenExposurePanel: () => void
   onOpenWhiteBalancePanel: () => void
@@ -70,6 +78,31 @@ export const QuickSettingsPanel = ({
       value={captureTimerMode === 'off' ? '关闭' : captureTimerMode}
       onPress={onToggleCaptureTimer}
     />
+    <View style={styles.saveModeGroup}>
+      <Text style={styles.settingLabel}>照片质量</Text>
+      <View style={styles.saveModeButtons}>
+        {dualCameraFilterRenderQualityPresets.map(item => (
+          <TouchableOpacity
+            key={item.id}
+            style={[
+              styles.saveModeButton,
+              filterRenderQuality === item.id && styles.saveModeButtonActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={() => onChangeFilterRenderQuality(item.id)}
+          >
+            <Text
+              style={[
+                styles.saveModeText,
+                filterRenderQuality === item.id && styles.saveModeTextActive,
+              ]}
+            >
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
     <View style={styles.saveModeGroup}>
       <Text style={styles.settingLabel}>照片保存</Text>
       <View style={styles.saveModeButtons}>

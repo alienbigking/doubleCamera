@@ -1,4 +1,4 @@
-export type DualCameraFilterRenderQuality = 'standard' | 'high'
+export type DualCameraFilterRenderQuality = 'standard' | 'original' | 'high'
 
 export type DualCameraFilterRenderQualityPreset = {
   id: DualCameraFilterRenderQuality
@@ -18,8 +18,15 @@ export const dualCameraFilterRenderQualityPresets: DualCameraFilterRenderQuality
       jpegQuality: 88,
     },
     {
+      id: 'original',
+      label: '原图',
+      description: '保留原始尺寸，保存更慢',
+      maxLongSide: Number.POSITIVE_INFINITY,
+      jpegQuality: 95,
+    },
+    {
       id: 'high',
-      label: '高质量',
+      label: '高清',
       description: '细节更完整，保存更慢',
       maxLongSide: 1920,
       jpegQuality: 92,

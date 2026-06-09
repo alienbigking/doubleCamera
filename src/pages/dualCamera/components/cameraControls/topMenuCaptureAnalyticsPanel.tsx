@@ -33,7 +33,9 @@ const formatPhotoSaveMode = (mode: string) => {
 const formatFilter = (filterId: string) => {
   if (filterId === 'none') return '原图'
   if (filterId === 'mono') return '黑白'
-  if (filterId.startsWith('quality:')) return filterId.replace('quality:', '')
+  if (filterId === 'quality:standard') return '质量：标准'
+  if (filterId === 'quality:original') return '质量：原图'
+  if (filterId === 'quality:high') return '质量：高清'
   return filterId
 }
 

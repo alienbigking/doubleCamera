@@ -1442,6 +1442,17 @@ const DualCamera = () => {
     trackCaptureAction('filter', filterId)
   }
 
+  const selectPhotoRenderQuality = (quality: DualCameraFilterRenderQuality) => {
+    setFilterRenderQuality(quality)
+    showControlStatusMessage(
+      quality === 'standard'
+        ? '照片质量：标准'
+        : quality === 'original'
+        ? '照片质量：原图'
+        : '照片质量：高清',
+    )
+  }
+
   const updateToneAdjustment = (
     key: ProfessionalToneAdjustmentKey,
     value: number,
@@ -2816,6 +2827,7 @@ const DualCamera = () => {
             ratio={ratio}
             captureTimerMode={captureTimerMode}
             photoSaveMode={photoSaveMode}
+            filterRenderQuality={filterRenderQuality}
             focusLocked={focusLocked}
             rearExposure={rearExposureBias}
             frontExposure={frontExposureBias}
@@ -2824,6 +2836,7 @@ const DualCamera = () => {
             onChangeRatio={setRatio}
             onToggleCaptureTimer={toggleCaptureTimer}
             onChangePhotoSaveMode={setPhotoSaveMode}
+            onChangeFilterRenderQuality={selectPhotoRenderQuality}
             onToggleFocusLock={toggleFocusLock}
             onOpenExposurePanel={() => setPanel('exposure')}
             onOpenWhiteBalancePanel={() => setPanel('whiteBalance')}
