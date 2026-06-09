@@ -6,6 +6,8 @@ export type Panel =
   | 'topMenuDisplay'
   | 'topMenuFilter'
   | 'topMenuAi'
+  | 'topMenuAnalytics'
+  | 'topMenuSettings'
   | 'proQuickIso'
   | 'proQuickShutter'
   | 'proQuickFocus'
@@ -15,11 +17,14 @@ export type Panel =
   | 'whiteBalance'
   | null
 export type PhotoSaveMode = 'combined' | 'separate' | 'combinedAndSeparate'
+export type VideoSaveMode = 'combined' | 'separate' | 'combinedAndSeparate'
 export type CaptureTimerMode = 'off' | '3s' | '10s'
 export type WhiteBalancePreset = 'auto' | 'cool' | 'natural' | 'warm'
-export type SaveFeedback = 'saving' | 'saved' | null
+export type SaveFeedback = 'saving' | 'saved' | 'fallback' | 'failed' | null
 export type FlashMode = 'off' | 'auto' | 'on'
 export type StabilizationMode = 'off' | 'standard' | 'cinematic'
+export type VideoResolutionMode = '720p' | '1080p' | '4k'
+export type DualVideoComposeMode = 'pip' | 'split'
 
 export type LensOption = {
   id: string

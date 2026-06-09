@@ -21,9 +21,11 @@ export const TopCameraToolbar = ({
   selectedLens,
   flashMode,
   flashAvailable,
+  flashIndicatorVisible,
   captureMode,
   stabilizationMode,
   stabilizationAvailable,
+  reduceTransparency,
   onToggleLensPanel,
   onToggleFlashMode,
   onToggleStabilizationMode,
@@ -33,9 +35,11 @@ export const TopCameraToolbar = ({
   selectedLens: LensOption
   flashMode: FlashMode
   flashAvailable: boolean
+  flashIndicatorVisible: boolean
   captureMode: 'photo' | 'video'
   stabilizationMode: StabilizationMode
   stabilizationAvailable: boolean
+  reduceTransparency: boolean
   onToggleLensPanel: () => void
   onToggleFlashMode: () => void
   onToggleStabilizationMode: () => void
@@ -43,32 +47,40 @@ export const TopCameraToolbar = ({
 }) => (
   <View style={[styles.topTools, { top }]}>
     <TouchableOpacity
-      style={styles.lensPill}
+      style={[styles.lensPill, reduceTransparency && styles.solidControl]}
       activeOpacity={0.8}
       onPress={onToggleLensPanel}
     >
       <Text style={styles.lensText}>{selectedLens.label}</Text>
       <Text style={styles.chevron}>▾</Text>
     </TouchableOpacity>
-    <View style={styles.featureGroup}>
-      <TouchableOpacity
-        style={[
-          styles.featureIconButton,
-          !flashAvailable && styles.featureIconButtonDisabled,
-        ]}
-        activeOpacity={0.8}
-        disabled={!flashAvailable}
-        onPress={onToggleFlashMode}
-      >
-        <MaterialIcons
-          name={getFlashIconName(flashMode)}
-          color={
-            flashAvailable ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.32)'
-          }
-          size={24}
-        />
-      </TouchableOpacity>
-      <View style={styles.featureDivider} />
+    <View
+      style={[styles.featureGroup, reduceTransparency && styles.solidControl]}
+    >
+      {flashIndicatorVisible && (
+        <>
+          <TouchableOpacity
+            style={[
+              styles.featureIconButton,
+              !flashAvailable && styles.featureIconButtonDisabled,
+            ]}
+            activeOpacity={0.8}
+            disabled={!flashAvailable}
+            onPress={onToggleFlashMode}
+          >
+            <MaterialIcons
+              name={getFlashIconName(flashMode)}
+              color={
+                flashAvailable
+                  ? 'rgba(255,255,255,0.9)'
+                  : 'rgba(255,255,255,0.32)'
+              }
+              size={24}
+            />
+          </TouchableOpacity>
+          <View style={styles.featureDivider} />
+        </>
+      )}
       <TouchableOpacity
         style={[
           styles.featureIconButton,
@@ -92,7 +104,7 @@ export const TopCameraToolbar = ({
       </TouchableOpacity>
     </View>
     <TouchableOpacity
-      style={styles.glassCircle}
+      style={[styles.glassCircle, reduceTransparency && styles.solidControl]}
       activeOpacity={0.8}
       onPress={onToggleMenu}
     >
@@ -156,6 +168,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(23,24,27,0.78)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.13)',
+  },
+  solidControl: {
+    backgroundColor: '#17181b',
   },
   featureIconButton: {
     width: 40,

@@ -408,54 +408,6 @@ export const GalleryModal = ({
   )
 }
 
-export const SettingsDrawer = ({
-  visible,
-  onClose,
-}: {
-  visible: boolean
-  onClose: () => void
-}) => (
-  <Modal visible={visible} animationType="slide" transparent>
-    <View style={styles.drawerBackdrop}>
-      <View style={styles.drawer}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>设置</Text>
-          <TouchableOpacity style={styles.closeCircle} onPress={onClose}>
-            <Text style={styles.iconText}>×</Text>
-          </TouchableOpacity>
-        </View>
-        <ScrollView showsVerticalScrollIndicator={false}>
-          <SettingsSection
-            title="拍摄设置"
-            items={[
-              '网格辅助线 开',
-              '定时拍照 关闭',
-              'HDR 开',
-              '焦段切换提示 开',
-            ]}
-          />
-          <SettingsSection
-            title="视频设置"
-            items={[
-              '分辨率 1080p 30fps',
-              '双视频合成 画中画',
-              '专业模式录制 关',
-            ]}
-          />
-          <SettingsSection
-            title="界面设置"
-            items={['音量键快门 开', '降低透明度省电 关', '显示闪光灯标识 开']}
-          />
-          <SettingsSection
-            title="高级设置"
-            items={['AI场景识别 开', '自动云备份 关', '拍摄数据分析 开']}
-          />
-        </ScrollView>
-      </View>
-    </View>
-  </Modal>
-)
-
 const PhotoMock = ({
   label,
   filePath,
@@ -471,24 +423,6 @@ const PhotoMock = ({
     )}
     <Text style={styles.photoLabel}>{label}</Text>
     {filePath && <Text style={styles.photoPath}>{filePath}</Text>}
-  </View>
-)
-
-const SettingsSection = ({
-  title,
-  items,
-}: {
-  title: string
-  items: string[]
-}) => (
-  <View style={styles.settingsSection}>
-    <Text style={styles.sectionTitle}>{title}</Text>
-    {items.map(item => (
-      <View key={item} style={styles.drawerItem}>
-        <Text style={styles.drawerItemText}>{item}</Text>
-        <Text style={styles.menuArrow}>›</Text>
-      </View>
-    ))}
   </View>
 )
 
@@ -792,39 +726,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: 'rgba(0,0,0,0.48)',
   },
-  drawerBackdrop: {
-    flex: 1,
-    alignItems: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.55)',
-  },
-  drawer: {
-    width: '86%',
-    height: '100%',
-    paddingTop: 36,
-    paddingHorizontal: 12,
-    backgroundColor: '#090b12',
-  },
-  settingsSection: { marginBottom: 24 },
-  sectionTitle: {
-    color: 'rgba(255,255,255,0.42)',
-    fontSize: 12,
-    fontWeight: '400',
-    marginHorizontal: 8,
-    marginBottom: 10,
-  },
-  drawerItem: {
-    minHeight: 54,
-    borderRadius: 16,
-    paddingHorizontal: 14,
-    marginBottom: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255,255,255,0.07)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  drawerItemText: { color: '#fff', fontSize: 15, fontWeight: '400' },
   menuArrow: {
     color: 'rgba(255,255,255,0.78)',
     fontSize: 24,

@@ -20,6 +20,7 @@ export const BottomCameraToolbar = ({
   captureBusy,
   recordingBusy,
   shutterScale,
+  reduceTransparency,
   onSetPhotoMode,
   onSetVideoMode,
   onToggleLayout,
@@ -35,6 +36,7 @@ export const BottomCameraToolbar = ({
   captureBusy: boolean
   recordingBusy: boolean
   shutterScale: Animated.Value
+  reduceTransparency: boolean
   onSetPhotoMode: () => void
   onSetVideoMode: () => void
   onToggleLayout: () => void
@@ -59,7 +61,10 @@ export const BottomCameraToolbar = ({
       </View>
       <View style={styles.controlRow}>
         <TouchableOpacity
-          style={styles.controlChip}
+          style={[
+            styles.controlChip,
+            reduceTransparency && styles.solidControl,
+          ]}
           activeOpacity={0.8}
           onPress={onToggleLayout}
         >
@@ -76,7 +81,7 @@ export const BottomCameraToolbar = ({
       </View>
       <View style={styles.shutterRow}>
         <TouchableOpacity
-          style={styles.sideButton}
+          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
           activeOpacity={0.8}
           onPress={onOpenGallery}
         >
@@ -87,7 +92,7 @@ export const BottomCameraToolbar = ({
           />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.sideButton}
+          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
           activeOpacity={0.8}
           onPress={onFlipPrimaryCamera}
         >
@@ -116,7 +121,7 @@ export const BottomCameraToolbar = ({
           />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.sideButton}
+          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
           activeOpacity={0.8}
           onPress={mode === 'video' ? onSetPhotoMode : onSetVideoMode}
         >
@@ -127,7 +132,7 @@ export const BottomCameraToolbar = ({
           />
         </TouchableOpacity>
         <TouchableOpacity
-          style={styles.sideButton}
+          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
           activeOpacity={0.8}
           onPress={onToggleQuickPanel}
         >
@@ -203,6 +208,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(23,24,27,0.78)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.13)',
+  },
+  solidControl: {
+    backgroundColor: '#17181b',
   },
   shutterOuter: {
     width: 76,

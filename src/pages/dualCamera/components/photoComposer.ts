@@ -13,6 +13,10 @@ import {
   type DualCameraFilterId,
   type DualCameraFilterRenderQuality,
 } from './filters'
+import {
+  fitSizeToAspectRatio,
+  resolvePhotoOutputAspectRatio,
+} from './photoOutputRatio'
 
 type CameraSide = 'rear' | 'front'
 type Point = { x: number; y: number }
@@ -26,6 +30,7 @@ export type ComposePhotoOptions = {
   pipPosition: Point
   pipSize: Size
   previewSize: Size
+  ratio: string
   filterId: DualCameraFilterId
   renderQuality: DualCameraFilterRenderQuality
 }
@@ -86,6 +91,7 @@ export const composeDualPhoto = async ({
   pipPosition,
   pipSize,
   previewSize,
+  ratio,
   filterId,
   renderQuality,
 }: ComposePhotoOptions) => {
@@ -96,13 +102,21 @@ export const composeDualPhoto = async ({
 
   try {
     const fittedPrimarySize = fitCanvasSize(primaryImage, renderQuality)
+    const outputAspectRatio = resolvePhotoOutputAspectRatio({
+      ratio,
+      previewSize,
+    })
+    const fittedOutputSize = fitSizeToAspectRatio(
+      fittedPrimarySize,
+      outputAspectRatio,
+    )
     const canvasSize =
       layout === 'split'
         ? {
-            width: fittedPrimarySize.width,
-            height: Math.round((fittedPrimarySize.width * 4) / 3),
+            width: fittedOutputSize.width,
+            height: fittedOutputSize.height,
           }
-        : fittedPrimarySize
+        : fittedOutputSize
     const surface = Skia.Surface.MakeOffscreen(
       canvasSize.width,
       canvasSize.height,
@@ -161,11 +175,20 @@ export const composeDualPhoto = async ({
 
         const scaleX = canvasSize.width / previewSize.width
         const scaleY = canvasSize.height / previewSize.height
+        const pipScale = Math.min(scaleX, scaleY)
+        const insetWidth = pipSize.width * pipScale
+        const insetHeight = pipSize.height * pipScale
         const insetRect = Skia.XYWHRect(
-          Math.max(12, pipPosition.x * scaleX),
-          Math.max(12, pipPosition.y * scaleY),
-          pipSize.width * scaleX,
-          pipSize.height * scaleY,
+          Math.min(
+            Math.max(12, pipPosition.x * scaleX),
+            canvasSize.width - insetWidth - 12,
+          ),
+          Math.min(
+            Math.max(12, pipPosition.y * scaleY),
+            canvasSize.height - insetHeight - 12,
+          ),
+          insetWidth,
+          insetHeight,
         )
         const insetRadius = Math.min(insetRect.width, insetRect.height) * 0.18
         canvas.save()

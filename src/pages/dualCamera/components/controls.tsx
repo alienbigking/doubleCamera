@@ -1,11 +1,5 @@
 import React from 'react'
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native'
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import type { StyleProp, ViewStyle } from 'react-native'
 
 export const GlassPanel = ({
@@ -14,14 +8,7 @@ export const GlassPanel = ({
 }: {
   children: React.ReactNode
   style?: StyleProp<ViewStyle>
-}) => (
-  <Pressable
-    style={[styles.glassPanel, style]}
-    onPress={event => event.stopPropagation()}
-  >
-    {children}
-  </Pressable>
-)
+}) => <View style={[styles.glassPanel, style]}>{children}</View>
 
 export const MenuItem = ({
   icon,
@@ -56,22 +43,28 @@ export const ToggleRow = ({
   icon,
   label,
   value,
+  valueText,
+  disabled,
   onValueChange,
 }: {
   icon?: React.ReactNode
   label: string
   value: boolean
+  valueText?: string
+  disabled?: boolean
   onValueChange: (value: boolean) => void
 }) => (
   <TouchableOpacity
-    style={styles.menuItem}
+    style={[styles.menuItem, disabled && styles.menuItemDisabled]}
     activeOpacity={0.75}
+    disabled={disabled}
     onPress={() => onValueChange(!value)}
   >
     <View style={styles.menuIconSlot}>
       {icon || <Text style={styles.menuIcon}>{value ? '●' : '○'}</Text>}
     </View>
     <Text style={styles.menuLabel}>{label}</Text>
+    {valueText ? <Text style={styles.menuValue}>{valueText}</Text> : null}
     <View style={[styles.switchTrack, value && styles.switchTrackActive]}>
       <View style={[styles.switchKnob, value && styles.switchKnobActive]} />
     </View>
@@ -139,6 +132,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
+  },
+  menuItemDisabled: {
+    opacity: 0.46,
   },
   menuIconSlot: {
     width: 24,

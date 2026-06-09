@@ -1,8 +1,8 @@
 import {
+  BlendMode,
   Skia,
   type SkCanvas,
   type SkImage,
-  type SkPaint,
 } from '@shopify/react-native-skia'
 import {
   getDualCameraFilterPreset,
@@ -11,11 +11,14 @@ import {
 import { blendModeMap, toColorWithOpacity } from './filterRenderingUtils'
 
 export type RealtimeFilterRenderAssets = {
-  imagePaint?: SkPaint
-  overlayPaint?: SkPaint
+  matrix?: number[]
+  overlay?: {
+    color: string
+    mode: BlendMode
+  }
 }
 
-// 实时滤镜绘制资源：把保存成片时复用的矩阵与叠色规则转换成实时预览可直接使用的 Paint。
+// 实时滤镜绘制配置：只保存可序列化数据，避免 SkPaint HostObject 跨帧复用后被释放。
 export const createRealtimeFilterRenderAssets = (
   filterId: DualCameraFilterId,
 ): RealtimeFilterRenderAssets => {
@@ -23,22 +26,17 @@ export const createRealtimeFilterRenderAssets = (
   const assets: RealtimeFilterRenderAssets = {}
 
   if (filter.photoMatrix) {
-    const imagePaint = Skia.Paint()
-    imagePaint.setAntiAlias(true)
-    imagePaint.setColorFilter(Skia.ColorFilter.MakeMatrix(filter.photoMatrix))
-    assets.imagePaint = imagePaint
+    assets.matrix = filter.photoMatrix
   }
 
   if (filter.photoBlend) {
-    const overlayPaint = Skia.Paint()
-    overlayPaint.setAntiAlias(true)
-    overlayPaint.setBlendMode(blendModeMap[filter.photoBlend.mode])
-    overlayPaint.setColor(
-      Skia.Color(
-        toColorWithOpacity(filter.photoBlend.color, filter.photoBlend.opacity),
+    assets.overlay = {
+      color: toColorWithOpacity(
+        filter.photoBlend.color,
+        filter.photoBlend.opacity,
       ),
-    )
-    assets.overlayPaint = overlayPaint
+      mode: blendModeMap[filter.photoBlend.mode],
+    }
   }
 
   return assets
@@ -54,12 +52,25 @@ export const drawRealtimeFilteredFrame = ({
   frameTexture: SkImage
   assets: RealtimeFilterRenderAssets
 }) => {
-  canvas.drawImage(frameTexture, 0, 0, assets.imagePaint)
+  'worklet'
 
-  if (assets.overlayPaint) {
+  const imagePaint = assets.matrix ? Skia.Paint() : undefined
+
+  if (imagePaint && assets.matrix) {
+    imagePaint.setAntiAlias(true)
+    imagePaint.setColorFilter(Skia.ColorFilter.MakeMatrix(assets.matrix))
+  }
+
+  canvas.drawImage(frameTexture, 0, 0, imagePaint)
+
+  if (assets.overlay) {
+    const overlayPaint = Skia.Paint()
+    overlayPaint.setAntiAlias(true)
+    overlayPaint.setBlendMode(assets.overlay.mode)
+    overlayPaint.setColor(Skia.Color(assets.overlay.color))
     canvas.drawRect(
       Skia.XYWHRect(0, 0, frameTexture.width(), frameTexture.height()),
-      assets.overlayPaint,
+      overlayPaint,
     )
   }
 }

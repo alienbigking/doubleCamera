@@ -1,4 +1,6 @@
-# DiscountExpert - 技术规范文档
+# doubleCamera - 双摄相机技术规范文档
+
+> 本项目已从旧的 DiscountExpert 模板迁移为双摄相机 App。后续开发应以“前后摄像头同时预览、拍照、录像、相册管理、专业控制、滤镜与 AI 增强”为主线；文档中仍残留的优惠入口、WebView、电商跳转等内容仅作为历史迁移记录，不能作为当前业务方向继续扩展。
 
 ## 技术架构
 
@@ -700,6 +702,144 @@ const handleSubmit = async () => {
 - **UI测试**: 用户交互模拟
 
 ## 已知问题与解决方案记录
+
+### 双摄 App 当前业务主线
+
+#### 产品定位
+doubleCamera 当前主线是“双摄相机”，核心能力围绕后置主摄和前置小窗的同时预览、拍照、录像和记录展开。后续任何功能设计都应优先考虑双摄一致性：
+- 主摄和前摄应尽量共享同一套能力模型，但允许按设备能力分别降级
+- 预览、拍照成片、录像、相册筛选需要保持同一套元数据口径
+- 前摄小窗不能只是 UI 装饰，它参与实时预览、滤镜、拍照保存、录像记录和后续分享
+- 新增能力时要检查主画面和小窗是否都接入，尤其是滤镜、方向、镜像、比例、曝光、白平衡、防抖、HDR 等能力
+
+#### 架构原则
+- `dualCamera.tsx` 只保留主状态和跨模块编排，面板、弹窗、工具栏、设置项、滤镜面板等都拆成独立组件文件
+- 顶部菜单和底部菜单的功能面板不能堆在单个 controls 文件里，每个业务面板需要独立模块，便于后续维护
+- 双摄能力优先使用 `react-native-vision-camera` 原生会话能力；只有拍照后处理、合成图、滤镜成片这类离线场景才优先使用 Skia
+- 任何实时帧处理都要控制频率、资源释放和设备发热，不能在 JS 线程逐帧做像素处理
+
+---
+
+### 黑白实时滤镜踩坑记录
+
+#### 最终结论
+黑白滤镜实时预览已经验证可行，但不能走早期的“拍照后处理思路”或“JPEG/base64 叠图思路”。当前稳定路线是：
+1. 使用 `react-native-vision-camera` 的 `useFrameOutput` 获取前后摄帧输出
+2. 使用 `react-native-vision-camera-skia` 的 `renderToTexture(frame, ...)` 在 frame runtime 内绘制滤镜结果
+3. 将结果转成 `makeNonTextureImage()` 后通过 `scheduleOnRN` 更新到 Reanimated `SharedValue`
+4. 主画面和前摄小窗都用 `RealtimeFilteredPreviewSurface` 覆盖滤镜纹理
+5. 底层仍保留原生 `CameraPreviewSurface`，滤镜纹理只在选中滤镜时覆盖显示
+
+#### 当前相关文件
+- `src/pages/dualCamera/components/realtimeFilteredPreview/useRealtimeFilteredFrameOutputs.ts`
+- `src/pages/dualCamera/components/realtimeFilteredPreview/realtimeFilteredPreviewSurface.tsx`
+- `src/pages/dualCamera/components/filters/filterRealtimeRenderer.ts`
+- `src/pages/dualCamera/components/filters/filterPhotoProcessor.ts`
+- `src/pages/dualCamera/components/photoComposer.ts`
+
+#### 不要再尝试的路线
+以下路线已经在 iOS 真机上反复验证存在问题，后续不要继续沿用：
+- 不要用 `readPixels` 从 Skia Image 同步读 GPU 像素再手动灰度处理。iOS/Metal 下可能返回空、不完整或格式不可靠，且会严重阻塞
+- 不要做 `Frame -> JPEG encode -> base64 -> Image source={{ uri }} -> Skia/React Native 叠层`。这条链路延迟高、发热明显，且容易被原生预览层或缓存行为绕过
+- 不要在 JS 线程逐帧做像素级黑白转换。实时相机帧率下会卡顿、发热，甚至导致 App 不稳定
+- 不要把 `@shopify/react-native-skia` 的声明式 `<Image><ColorMatrix /></Image>` 当作实时相机预览的可靠方案。它适合静态图或局部 UI，但在当前 iOS 双摄预览链路中不稳定
+- 不要在 frame runtime 里同步调用普通 JS/RN 函数。曾出现 `[Worklets] Tried to synchronously call a Remote Function`，正确做法是用 worklet 内可执行的绘制逻辑，并通过 `scheduleOnRN` 回到 RN 侧更新状态
+
+#### 已解决的问题
+- 黑白滤镜主摄实时预览不生效：改为 `useFrameOutput + renderToTexture`
+- 黑白滤镜小窗实时预览不生效：小窗接入同一套实时滤镜纹理输出
+- 前摄小窗加滤镜后倒置或左右位置变化：使用正确的 frame output orientation 和 preview/photo/video mirror 配置，不在 Skia 层做临时方向修正
+- 加滤镜拍照保存闪退：拍照期间暂停实时滤镜输出并及时释放 Skia `SkImage` 资源
+- 保存照片时前摄人像左右反：前摄 preview/frame/photo/video 保持 `mirrorMode: 'on'`，保证预览和成片认知一致
+
+#### 实时滤镜与拍照滤镜的边界
+- 实时预览滤镜：走 `useFrameOutput + renderToTexture`，服务于用户取景
+- 拍照成片滤镜：走 Skia Offscreen Surface，服务于保存到相册的照片质量
+- 双摄合成照片：走 `photoComposer.ts`，需要同时处理主摄图、前摄小窗图、圆角边框和滤镜
+- 拍照期间要避免实时滤镜和成片滤镜同时抢占 Skia/GPU 资源
+
+---
+
+### AI 增强功能版本规划
+
+#### 总原则
+AI 增强必须服务双摄相机，而不是只做单摄美化。所有能力都要考虑：
+- 后置主摄和前置小窗是否都支持
+- 双摄会话是否允许同时开启该能力
+- 设备不支持时 UI 要明确降级为“不支持”
+- 实时分析必须低频运行，不能影响双摄预览、录像和拍照保存速度
+- AI 结果不能随意自动改用户参数，V1/V2 优先采用“开关 + 建议 + 轻量自动化”
+
+#### V1：原生相机增强能力接入（已作为第一版实现方向）
+目标是先利用当前相机库已有能力，不引入大模型或复杂视觉算法。
+
+功能需求：
+- 智能 HDR：复用照片 HDR 能力，优先改善逆光和高动态场景
+- 低光增强：接入设备支持的 low light boost，改善暗光预览和拍摄
+- 平滑对焦：接入 smooth auto focus，减少对焦突变
+- 广角畸变矫正：接入 distortion correction，改善广角边缘变形
+- UI 面板显示每项能力是否支持，不支持时禁用
+
+实现要求：
+- 通过 rear controller 的设备能力判断支持状态
+- `controller.configure(...)` 只传设备支持的配置项
+- 视频会话重新配置后要重新应用 AI 增强设置
+- Smart HDR 与照片 HDR 设置保持同步
+- V1 不做真正的语义识别，只做原生能力开关和稳定降级
+
+当前关联模块：
+- `src/pages/dualCamera/components/cameraControls/topMenuAiEnhancePanel.tsx`
+- `src/pages/dualCamera/components/dualCamera.tsx`
+
+#### V2：轻量场景识别与拍摄建议（后续再做）
+目标是在不显著增加发热和功耗的前提下，基于低频帧分析给出简单场景判断。
+
+功能需求：
+- 识别暗光场景：平均亮度低时提示或建议开启低光增强
+- 识别逆光场景：中心区域偏暗且边缘/背景高亮时提示或建议开启 HDR
+- 识别文档/屏幕场景：高对比、低饱和、大面积规则亮面时建议提高对比或使用黑白/文档滤镜
+- 识别人像/自拍场景：前摄小窗有人脸时可提示前摄曝光/白平衡独立调整
+- 页面上以轻提示或小状态条呈现，不要频繁弹窗打扰拍摄
+
+实现要求：
+- 新建独立模块，例如 `src/pages/dualCamera/components/aiScene/`
+- 场景分析频率控制在 1-5 fps，默认不逐帧分析
+- 优先分析低分辨率 frame 或统计值，不传大图到 JS 线程
+- V2 不自动强改用户设置，最多给出建议或在用户开启“自动增强”后轻量切换
+- 需要同时考虑主摄和前摄：主摄负责主要场景判断，前摄负责小窗人像/自拍状态
+
+建议模块拆分：
+- `aiSceneHeuristics.ts`：亮度、对比、饱和度、中心/边缘差异等启发式算法
+- `useAiSceneRecognition.ts`：低频调度、状态管理、结果去抖
+- `aiSceneStatusBadge.tsx`：主页上的轻提示
+- `topMenuAiEnhancePanel.tsx`：展示识别结果和自动增强开关
+
+#### V3：原生视觉/ML 增强（长期方案）
+目标是实现更稳定、更专业的实时增强，但需要原生模块或模型能力支撑。
+
+功能需求：
+- iOS 使用 CoreImage / Vision / Metal，Android 使用 CameraX / ML Kit / RenderScript 替代方案或 GPU Shader
+- 支持更准确的场景分类：夜景、逆光、人像、文档、食物、运动、室内、户外等
+- 支持人脸相关增强：前摄曝光优先、肤色保护、背景/主体分离提示
+- 支持更高级的实时滤镜或 LUT，必要时让录像也带滤镜
+- 支持按主摄/前摄分别应用不同增强策略
+
+实现要求：
+- 不建议在 RN JS 层做 V3 级别视觉算法
+- 优先封装原生模块或 VisionCamera Frame Processor Plugin
+- 需要明确电量、温度、帧率和内存指标
+- 需要提供总开关、自动/手动模式、设备能力降级
+- 需要在双摄会话下验证前后摄同时工作时的性能，不以单摄 demo 结果作为上线依据
+
+#### 暂缓项
+以下能力复杂度较高，暂不在 V1/V2 强行实现：
+- 真正的多类别 ML 场景识别
+- 实时美颜/磨皮/人像分割
+- 滤镜后视频录制
+- 云端 AI 增强
+- 自动构图和主体追踪
+
+---
 
 ### 入口卡片跳转方案（WebView + H5 + App 唤起）
 

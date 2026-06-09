@@ -11,7 +11,7 @@ export const MoreMenuPanel = ({
   onOpenDisplay,
   onOpenFilter,
   onOpenAi,
-  onOpenSkiaTest,
+  onOpenAnalytics,
   onOpenGallery,
   onOpenSettings,
 }: {
@@ -21,7 +21,7 @@ export const MoreMenuPanel = ({
   onOpenDisplay: () => void
   onOpenFilter: () => void
   onOpenAi: () => void
-  onOpenSkiaTest: () => void
+  onOpenAnalytics: () => void
   onOpenGallery: () => void
   onOpenSettings: () => void
 }) => (
@@ -69,13 +69,6 @@ export const MoreMenuPanel = ({
     />
     <MenuItem
       icon={
-        <MaterialIcons name="science" color="rgba(255,255,255,0.9)" size={21} />
-      }
-      label="Skia 测试"
-      onPress={onOpenSkiaTest}
-    />
-    <MenuItem
-      icon={
         <MaterialIcons
           name="photo-library"
           color="rgba(255,255,255,0.9)"
@@ -84,6 +77,17 @@ export const MoreMenuPanel = ({
       }
       label="相册"
       onPress={onOpenGallery}
+    />
+    <MenuItem
+      icon={
+        <MaterialIcons
+          name="analytics"
+          color="rgba(255,255,255,0.9)"
+          size={21}
+        />
+      }
+      label="拍摄统计"
+      onPress={onOpenAnalytics}
     />
     <MenuItem
       icon={

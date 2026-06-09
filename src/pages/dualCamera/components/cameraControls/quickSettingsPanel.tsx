@@ -165,11 +165,17 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     marginBottom: 8,
   },
-  ratioGroup: { flexDirection: 'row', gap: 6, marginBottom: 8 },
+  ratioGroup: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
   ratioItem: {
-    paddingHorizontal: 9,
+    width: 50,
     paddingVertical: 6,
     borderRadius: 10,
+    alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   ratioItemActive: {

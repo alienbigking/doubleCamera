@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react'
-import { Skia, type SkImage } from '@shopify/react-native-skia'
+import { type SkImage } from '@shopify/react-native-skia'
 import { useSharedValue, type SharedValue } from 'react-native-reanimated'
 import {
   CommonResolutions,
@@ -10,7 +10,10 @@ import {
 import { renderToTexture } from 'react-native-vision-camera-skia'
 import { scheduleOnRN } from 'react-native-worklets'
 import type { DualCameraFilterId } from '../filters'
-import { createRealtimeFilterRenderAssets } from '../filters/filterRealtimeRenderer'
+import {
+  createRealtimeFilterRenderAssets,
+  drawRealtimeFilteredFrame,
+} from '../filters/filterRealtimeRenderer'
 
 type CameraSide = 'rear' | 'front'
 type FrameOutputs = Record<CameraSide, CameraFrameOutput>
@@ -79,19 +82,11 @@ export const useRealtimeFilteredFrameOutputs = ({
           }
 
           snapshot = renderToTexture(frame, ({ canvas, frameTexture }) => {
-            canvas.drawImage(frameTexture, 0, 0, renderAssets.imagePaint)
-
-            if (renderAssets.overlayPaint) {
-              canvas.drawRect(
-                Skia.XYWHRect(
-                  0,
-                  0,
-                  frameTexture.width(),
-                  frameTexture.height(),
-                ),
-                renderAssets.overlayPaint,
-              )
-            }
+            drawRealtimeFilteredFrame({
+              canvas,
+              frameTexture,
+              assets: renderAssets,
+            })
           })
 
           const snapshotCpuCopy = snapshot.makeNonTextureImage()

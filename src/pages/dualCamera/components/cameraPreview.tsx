@@ -1,6 +1,6 @@
 import React, { type ReactNode } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import type { StyleProp, ViewStyle } from 'react-native'
+import type { LayoutRectangle, StyleProp, ViewStyle } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
 import {
   NativePreviewView,
@@ -9,10 +9,11 @@ import {
 
 const compactCornerRadius = 32
 const ratioAspectMap: Record<string, number> = {
-  '4:3': 4 / 3,
-  '16:9': 16 / 9,
   '1:1': 1,
+  '4:3': 4 / 3,
+  '5:4': 5 / 4,
   '9:16': 9 / 16,
+  '16:9': 16 / 9,
 }
 
 const getAspectRatio = (ratio?: string) =>
@@ -26,8 +27,10 @@ export const CameraPane = ({
   previewContent,
   statusText,
   ratio,
+  gridEnabled = true,
   focusLocked,
   onUnlockFocus,
+  onViewportLayout,
 }: {
   label: string
   full?: boolean
@@ -36,8 +39,10 @@ export const CameraPane = ({
   previewContent?: ReactNode
   statusText?: string
   ratio?: string
+  gridEnabled?: boolean
   focusLocked?: boolean
   onUnlockFocus?: () => void
+  onViewportLayout?: (layout: LayoutRectangle) => void
 }) => {
   const aspectRatio = getAspectRatio(ratio)
 
@@ -56,16 +61,19 @@ export const CameraPane = ({
             ? [styles.ratioViewportFixed, { aspectRatio }]
             : styles.ratioViewportFull,
         ]}
+        onLayout={event => onViewportLayout?.(event.nativeEvent.layout)}
       >
         {previewContent || (
           <CameraPreviewSurface previewOutput={previewOutput} />
         )}
-        <View style={styles.gridOverlay}>
-          <View style={styles.gridLineV} />
-          <View style={[styles.gridLineV, { left: '66.66%' }]} />
-          <View style={styles.gridLineH} />
-          <View style={[styles.gridLineH, { top: '66.66%' }]} />
-        </View>
+        {gridEnabled && (
+          <View style={styles.gridOverlay}>
+            <View style={styles.gridLineV} />
+            <View style={[styles.gridLineV, { left: '66.66%' }]} />
+            <View style={styles.gridLineH} />
+            <View style={[styles.gridLineH, { top: '66.66%' }]} />
+          </View>
+        )}
         {focusLocked && <FocusLockIndicator onUnlockFocus={onUnlockFocus} />}
         <Text style={styles.cameraLabel}>{label}</Text>
       </View>

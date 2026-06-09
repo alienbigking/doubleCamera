@@ -1,11 +1,9 @@
 import React from 'react'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import DualCamera from '@/pages/dualCamera/components/dualCamera'
-import SkiaFilterTest from '@/pages/skiaFilterTest/components/skiaFilterTest'
 
 export type RootStackParamList = {
   Camera: undefined
-  SkiaFilterTest: undefined
   Main: undefined
   Login: undefined
   Register: undefined
@@ -32,7 +30,6 @@ const AppNavigator = () => {
       }}
       initialRouteName="Camera"
     >
-      <Stack.Screen name="SkiaFilterTest" component={SkiaFilterTest} />
       <Stack.Screen name="Camera" component={DualCamera} />
     </Stack.Navigator>
   )

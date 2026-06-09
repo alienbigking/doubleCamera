@@ -15,6 +15,10 @@ import {
   type DualCameraFilterRenderQuality,
 } from './filterRenderQualityPresets'
 import { blendModeMap, toColorWithOpacity } from './filterRenderingUtils'
+import {
+  fitSizeToAspectRatio,
+  resolvePhotoOutputAspectRatio,
+} from '../photoOutputRatio'
 
 const stripFileScheme = (uri: string) =>
   uri.startsWith('file://') ? uri.replace('file://', '') : uri
@@ -129,15 +133,24 @@ export const applyFilterToPhoto = async (
   uri: string,
   filterId: DualCameraFilterId,
   renderQuality: DualCameraFilterRenderQuality,
+  outputOptions?: {
+    ratio?: string
+    previewSize?: { width: number; height: number }
+  },
 ) => {
-  if (filterId === 'none') {
+  const outputAspectRatio = resolvePhotoOutputAspectRatio(outputOptions || {})
+
+  if (filterId === 'none' && !outputAspectRatio) {
     return uri
   }
 
   const image = await loadImage(uri)
 
   try {
-    const size = fitCanvasSize(image, renderQuality)
+    const size = fitSizeToAspectRatio(
+      fitCanvasSize(image, renderQuality),
+      outputAspectRatio,
+    )
     const surface = Skia.Surface.MakeOffscreen(size.width, size.height)
 
     if (!surface) {

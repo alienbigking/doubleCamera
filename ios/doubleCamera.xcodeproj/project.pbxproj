@@ -9,6 +9,10 @@
 /* Begin PBXBuildFile section */
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		762001012F1A0001006654EE /* VolumeButtonManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001002F1A0001006654EE /* VolumeButtonManager.swift */; };
+		762001032F1A0002006654EE /* VolumeButtonManagerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 762001022F1A0002006654EE /* VolumeButtonManagerBridge.m */; };
+		762001052F1A0003006654EE /* DualVideoComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001042F1A0003006654EE /* DualVideoComposer.swift */; };
+		762001072F1A0004006654EE /* DualVideoComposerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 762001062F1A0004006654EE /* DualVideoComposerBridge.m */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		8A488C4C24E620A660F72D6E /* libPods-doubleCamera.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FE4C9C9F0114384DAD2A46A6 /* libPods-doubleCamera.a */; };
 		DA91C740C1E113133FD63ADB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
@@ -22,6 +26,10 @@
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = doubleCamera/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		4D5E12B429E7F70B82D8232E /* Pods-doubleCamera.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-doubleCamera.release.xcconfig"; path = "Target Support Files/Pods-doubleCamera/Pods-doubleCamera.release.xcconfig"; sourceTree = "<group>"; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = doubleCamera/AppDelegate.swift; sourceTree = "<group>"; };
+		762001002F1A0001006654EE /* VolumeButtonManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = VolumeButtonManager.swift; path = doubleCamera/VolumeButtonManager.swift; sourceTree = "<group>"; };
+		762001022F1A0002006654EE /* VolumeButtonManagerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = VolumeButtonManagerBridge.m; path = doubleCamera/VolumeButtonManagerBridge.m; sourceTree = "<group>"; };
+		762001042F1A0003006654EE /* DualVideoComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DualVideoComposer.swift; path = doubleCamera/DualVideoComposer.swift; sourceTree = "<group>"; };
+		762001062F1A0004006654EE /* DualVideoComposerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DualVideoComposerBridge.m; path = doubleCamera/DualVideoComposerBridge.m; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = doubleCamera/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A90794981F064F2013ADE0BD /* Pods-doubleCamera.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-doubleCamera.debug.xcconfig"; path = "Target Support Files/Pods-doubleCamera/Pods-doubleCamera.debug.xcconfig"; sourceTree = "<group>"; };
 		AA1DA52D3F704EDB903CCA19 /* Colors.xcassets */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 9; includeInIndex = 0; lastKnownFileType = folder.assetcatalog; name = Colors.xcassets; path = doubleCamera/Colors.xcassets; sourceTree = "<group>"; };
@@ -57,6 +65,10 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				ADF8E7A52F164BB900E77C98 /* launch.imageset */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
+				762001002F1A0001006654EE /* VolumeButtonManager.swift */,
+				762001022F1A0002006654EE /* VolumeButtonManagerBridge.m */,
+				762001042F1A0003006654EE /* DualVideoComposer.swift */,
+				762001062F1A0004006654EE /* DualVideoComposerBridge.m */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
@@ -266,6 +278,10 @@
 			buildActionMask = 2147483647;
 			files = (
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
+				762001012F1A0001006654EE /* VolumeButtonManager.swift in Sources */,
+				762001032F1A0002006654EE /* VolumeButtonManagerBridge.m in Sources */,
+				762001052F1A0003006654EE /* DualVideoComposer.swift in Sources */,
+				762001072F1A0004006654EE /* DualVideoComposerBridge.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

@@ -15,9 +15,11 @@ export {
 export { QuickSettingsPanel } from './quickSettingsPanel'
 export { SaveFeedbackToast } from './saveFeedbackToast'
 export { TopMenuAiEnhancePanel } from './topMenuAiEnhancePanel'
+export { TopMenuCaptureAnalyticsPanel } from './topMenuCaptureAnalyticsPanel'
 export { TopMenuDisplayPanel } from './topMenuDisplayPanel'
 export { TopMenuFilterPanel } from './topMenuFilterPanel'
 export { TopMenuProfessionalPanel } from './topMenuProfessionalPanel'
+export { TopMenuSettingsPanel } from './topMenuSettingsPanel'
 export { TopCameraToolbar } from './topCameraToolbar'
 export {
   WhiteBalanceControlPanel,
@@ -27,6 +29,7 @@ export {
 export type {
   CaptureMode,
   CaptureTimerMode,
+  DualVideoComposeMode,
   FlashMode,
   LensOption,
   LayoutMode,
@@ -34,5 +37,7 @@ export type {
   PhotoSaveMode,
   SaveFeedback,
   StabilizationMode,
+  VideoResolutionMode,
+  VideoSaveMode,
   WhiteBalancePreset,
 } from './types'

@@ -13,15 +13,33 @@ export const SaveFeedbackToast = ({
 }) => {
   if (!feedback) return null
 
+  const isSaved = feedback === 'saved'
+  const isFailed = feedback === 'failed'
+  const isFallback = feedback === 'fallback'
+
   return (
     <View pointerEvents="none" style={[styles.saveFeedback, { bottom }]}>
       <MaterialIcons
-        name={feedback === 'saved' ? 'check-circle' : 'save'}
-        color={feedback === 'saved' ? '#72ff9d' : '#fff'}
+        name={
+          isSaved
+            ? 'check-circle'
+            : isFailed
+            ? 'error-outline'
+            : isFallback
+            ? 'info-outline'
+            : 'save'
+        }
+        color={isSaved ? '#72ff9d' : isFailed ? '#ff8c8c' : '#fff'}
         size={18}
       />
       <Text style={styles.saveFeedbackText}>
-        {feedback === 'saved' ? '已保存' : '保存中'}
+        {isSaved
+          ? '已保存'
+          : isFailed
+          ? '保存失败，请重试'
+          : isFallback
+          ? '合成失败，已保存原始视频'
+          : '双摄数据处理量大，保存需要时间，请稍等'}
       </Text>
     </View>
   )
@@ -32,8 +50,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     alignSelf: 'center',
     minHeight: 34,
-    borderRadius: 17,
-    paddingHorizontal: 13,
+    maxWidth: '86%',
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -45,5 +65,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 12,
     fontWeight: '400',
+    lineHeight: 16,
+    flexShrink: 1,
   },
 })
