@@ -13,6 +13,7 @@ type ComposeDualVideoOptions = {
   pipPosition: Point
   pipSize: Size
   previewSize: Size
+  pipBorderVisible?: boolean
 }
 
 type DualVideoComposerModule = {
@@ -27,6 +28,7 @@ type DualVideoComposerModule = {
     previewWidth: number,
     previewHeight: number,
     primaryCamera: CameraSide,
+    pipBorderVisible: boolean,
   ) => Promise<string>
 }
 
@@ -53,6 +55,7 @@ export const composeDualVideo = async ({
   pipPosition,
   pipSize,
   previewSize,
+  pipBorderVisible = true,
 }: ComposeDualVideoOptions) => {
   if (Platform.OS !== 'ios') {
     throw new Error('Dual video composition is currently only implemented on iOS.')
@@ -72,5 +75,6 @@ export const composeDualVideo = async ({
     previewSize.width,
     previewSize.height,
     primaryCamera,
+    pipBorderVisible,
   )
 }

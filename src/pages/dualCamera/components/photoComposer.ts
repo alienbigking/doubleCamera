@@ -33,6 +33,7 @@ export type ComposePhotoOptions = {
   ratio: string
   filterId: DualCameraFilterId
   renderQuality: DualCameraFilterRenderQuality
+  pipBorderVisible?: boolean
 }
 
 const stripFileScheme = (uri: string) =>
@@ -94,6 +95,7 @@ export const composeDualPhoto = async ({
   ratio,
   filterId,
   renderQuality,
+  pipBorderVisible = true,
 }: ComposePhotoOptions) => {
   const secondaryCamera: CameraSide =
     primaryCamera === 'rear' ? 'front' : 'rear'
@@ -205,15 +207,17 @@ export const composeDualPhoto = async ({
         })
         canvas.restore()
 
-        const borderPaint = Skia.Paint()
-        borderPaint.setAntiAlias(true)
-        borderPaint.setStyle(PaintStyle.Stroke)
-        borderPaint.setStrokeWidth(Math.max(3, Math.min(scaleX, scaleY) * 3))
-        borderPaint.setColor(Skia.Color('rgba(255,255,255,0.42)'))
-        canvas.drawRRect(
-          Skia.RRectXY(insetRect, insetRadius, insetRadius),
-          borderPaint,
-        )
+        if (pipBorderVisible) {
+          const borderPaint = Skia.Paint()
+          borderPaint.setAntiAlias(true)
+          borderPaint.setStyle(PaintStyle.Stroke)
+          borderPaint.setStrokeWidth(Math.max(2, Math.min(scaleX, scaleY) * 2))
+          borderPaint.setColor(Skia.Color('rgba(0,0,0,0.38)'))
+          canvas.drawRRect(
+            Skia.RRectXY(insetRect, insetRadius, insetRadius),
+            borderPaint,
+          )
+        }
       }
 
       surface.flush()

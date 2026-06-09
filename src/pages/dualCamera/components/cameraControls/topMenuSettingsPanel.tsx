@@ -37,6 +37,7 @@ export const TopMenuSettingsPanel = ({
   videoSaveMode,
   proVideoEnabled,
   volumeShutterEnabled,
+  pipBorderVisible,
   reduceTransparencyEnabled,
   flashIndicatorEnabled,
   aiSceneEnabled,
@@ -50,6 +51,7 @@ export const TopMenuSettingsPanel = ({
   onSetVideoSaveMode,
   onToggleProVideo,
   onToggleVolumeShutter,
+  onTogglePipBorder,
   onToggleReduceTransparency,
   onToggleFlashIndicator,
   onToggleAiScene,
@@ -68,6 +70,7 @@ export const TopMenuSettingsPanel = ({
   videoSaveMode: VideoSaveMode
   proVideoEnabled: boolean
   volumeShutterEnabled: boolean
+  pipBorderVisible: boolean
   reduceTransparencyEnabled: boolean
   flashIndicatorEnabled: boolean
   aiSceneEnabled: boolean
@@ -81,6 +84,7 @@ export const TopMenuSettingsPanel = ({
   onSetVideoSaveMode: (mode: VideoSaveMode) => void
   onToggleProVideo: (value: boolean) => void
   onToggleVolumeShutter: (value: boolean) => void
+  onTogglePipBorder: (value: boolean) => void
   onToggleReduceTransparency: (value: boolean) => void
   onToggleFlashIndicator: (value: boolean) => void
   onToggleAiScene: (value: boolean) => void
@@ -181,6 +185,12 @@ export const TopMenuSettingsPanel = ({
           label="音量键快门"
           value={volumeShutterEnabled}
           onValueChange={onToggleVolumeShutter}
+        />
+        <ToggleRow
+          icon={<MaterialIcons name="picture-in-picture-alt" color="#fff" size={20} />}
+          label="小窗白色边框"
+          value={pipBorderVisible}
+          onValueChange={onTogglePipBorder}
         />
         <ToggleRow
           icon={<MaterialIcons name="battery-saver" color="#fff" size={20} />}

@@ -398,6 +398,7 @@ const DualCamera = () => {
   const [videoSaveMode, setVideoSaveMode] = useState<VideoSaveMode>('combined')
   const [proVideoEnabled, setProVideoEnabled] = useState(false)
   const [volumeShutterEnabled, setVolumeShutterEnabled] = useState(true)
+  const [pipBorderVisible, setPipBorderVisible] = useState(true)
   const [reduceTransparencyEnabled, setReduceTransparencyEnabled] =
     useState(false)
   const [flashIndicatorEnabled, setFlashIndicatorEnabled] = useState(true)
@@ -1255,6 +1256,7 @@ const DualCamera = () => {
     setVideoSaveMode('combined')
     setProVideoEnabled(false)
     setVolumeShutterEnabled(true)
+    setPipBorderVisible(true)
     setReduceTransparencyEnabled(false)
     setFlashIndicatorEnabled(true)
     setAiSceneEnabled(true)
@@ -1370,6 +1372,11 @@ const DualCamera = () => {
   const toggleVolumeShutterSetting = (enabled: boolean) => {
     setVolumeShutterEnabled(enabled)
     showControlStatusMessage(enabled ? '音量键快门已开启' : '音量键快门已关闭')
+  }
+
+  const togglePipBorderSetting = (enabled: boolean) => {
+    setPipBorderVisible(enabled)
+    showControlStatusMessage(enabled ? '小窗白边已显示' : '小窗白边已隐藏')
   }
 
   const toggleCaptureAnalyticsSetting = (enabled: boolean) => {
@@ -1676,6 +1683,7 @@ const DualCamera = () => {
       ratio,
       filterId: selectedFilterId,
       renderQuality: filterRenderQuality,
+      pipBorderVisible,
     })
     return CameraRoll.saveAsset(combinedPhotoUri, {
       type: 'photo',
@@ -2000,6 +2008,38 @@ const DualCamera = () => {
     }
   }
 
+  useEffect(() => {
+    if (
+      mode !== 'video' ||
+      previewStatus !== 'ready' ||
+      recording ||
+      videoCaptureReady
+    ) {
+      return
+    }
+
+    let cancelled = false
+    configureVideoSession().then(configured => {
+      if (!cancelled && configured) {
+        showControlStatusMessage('录像已就绪')
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    mode,
+    previewStatus,
+    videoCaptureReady,
+    videoResolution,
+    stabilizationMode,
+    proVideoEnabled,
+    proMode,
+    selectedLensId,
+    recording,
+  ])
+
   const stopVideoRecording = async () => {
     if (!recording || recordingBusy) return
 
@@ -2106,6 +2146,7 @@ const DualCamera = () => {
           pipPosition: localPipPosition,
           pipSize,
           previewSize,
+          pipBorderVisible,
         })
         const combinedFileInfo = await getExistingFileInfo(combinedVideoUri)
         if (!combinedFileInfo || combinedFileInfo.size <= 0) {
@@ -2268,6 +2309,7 @@ const DualCamera = () => {
           <View
             style={[
               styles.pip,
+              !pipBorderVisible && styles.pipNoBorder,
               {
                 left: pipPosition.x,
                 top: pipPosition.y,
@@ -2275,7 +2317,12 @@ const DualCamera = () => {
             ]}
             {...pipPanResponder.panHandlers}
           >
-            <View style={styles.pipInner}>
+            <View
+              style={[
+                styles.pipInner,
+                !pipBorderVisible && styles.pipInnerNoBorder,
+              ]}
+            >
               {secondaryPreviewContent ? (
                 <RealtimeFilteredPreviewSurface
                   previewOutput={previewOutputs[secondaryCamera]}
@@ -2543,6 +2590,7 @@ const DualCamera = () => {
             videoSaveMode={videoSaveMode}
             proVideoEnabled={proVideoEnabled}
             volumeShutterEnabled={volumeShutterEnabled}
+            pipBorderVisible={pipBorderVisible}
             reduceTransparencyEnabled={reduceTransparencyEnabled}
             flashIndicatorEnabled={flashIndicatorEnabled}
             aiSceneEnabled={aiSceneEnabled}
@@ -2556,6 +2604,7 @@ const DualCamera = () => {
             onSetVideoSaveMode={setVideoSaveMode}
             onToggleProVideo={toggleProVideoSetting}
             onToggleVolumeShutter={toggleVolumeShutterSetting}
+            onTogglePipBorder={togglePipBorderSetting}
             onToggleReduceTransparency={setReduceTransparencyEnabled}
             onToggleFlashIndicator={setFlashIndicatorEnabled}
             onToggleAiScene={setAiSceneEnabled}
@@ -2661,8 +2710,8 @@ const styles = StyleSheet.create({
     width: 142,
     height: 184,
     borderRadius: pipCornerRadius,
-    padding: 3,
-    backgroundColor: 'rgba(255,255,255,0.38)',
+    padding: 2,
+    backgroundColor: 'rgba(0,0,0,0.38)',
     zIndex: 4,
     shadowColor: '#000',
     shadowOpacity: 0.24,
@@ -2670,14 +2719,21 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 5 },
     elevation: 8,
   },
+  pipNoBorder: {
+    padding: 0,
+    backgroundColor: 'transparent',
+  },
   pipInner: {
     flex: 1,
-    borderRadius: pipCornerRadius - 3,
+    borderRadius: pipCornerRadius - 2,
     overflow: 'hidden',
     backgroundColor: 'transparent',
   },
+  pipInnerNoBorder: {
+    borderRadius: pipCornerRadius,
+  },
   pipPreviewSurface: {
-    borderRadius: pipCornerRadius - 3,
+    borderRadius: pipCornerRadius - 2,
     backgroundColor: 'transparent',
   },
   pipLabel: {

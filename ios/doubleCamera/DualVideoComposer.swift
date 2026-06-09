@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreImage
 import React
+import UIKit
 
 @objc(DualVideoComposer)
 final class DualVideoComposer: NSObject {
@@ -17,7 +18,7 @@ final class DualVideoComposer: NSObject {
     false
   }
 
-  @objc(composeDualVideo:frontVideoPath:layout:pipX:pipY:pipWidth:pipHeight:previewWidth:previewHeight:primaryCamera:resolver:rejecter:)
+  @objc(composeDualVideo:frontVideoPath:layout:pipX:pipY:pipWidth:pipHeight:previewWidth:previewHeight:primaryCamera:pipBorderVisible:resolver:rejecter:)
   func composeDualVideo(
     rearVideoPath: String,
     frontVideoPath: String,
@@ -29,6 +30,7 @@ final class DualVideoComposer: NSObject {
     previewWidth: NSNumber,
     previewHeight: NSNumber,
     primaryCamera: String,
+    pipBorderVisible: Bool,
     resolver resolve: @escaping RCTPromiseResolveBlock,
     rejecter reject: @escaping RCTPromiseRejectBlock
   ) {
@@ -48,7 +50,8 @@ final class DualVideoComposer: NSObject {
             width: CGFloat(truncating: previewWidth),
             height: CGFloat(truncating: previewHeight)
           ),
-          primaryCamera: primaryCamera
+          primaryCamera: primaryCamera,
+          pipBorderVisible: pipBorderVisible
         )
         resolve(outputURL.absoluteString)
       } catch {
@@ -63,7 +66,8 @@ final class DualVideoComposer: NSObject {
     layout: String,
     pipRect: CGRect,
     previewSize: CGSize,
-    primaryCamera: String
+    primaryCamera: String,
+    pipBorderVisible: Bool
   ) async throws -> URL {
     let rearAsset = AVURLAsset(url: URL(fileURLWithPath: rearVideoPath))
     let frontAsset = AVURLAsset(url: URL(fileURLWithPath: frontVideoPath))
@@ -90,7 +94,9 @@ final class DualVideoComposer: NSObject {
     let rearGeometry = try await videoGeometry(for: rearSourceTrack, side: "rear")
     let frontGeometry = try await videoGeometry(for: frontSourceTrack, side: "front")
     let primarySize = primaryCamera == "front" ? frontGeometry.orientedSize : rearGeometry.orientedSize
-    let outputSize = outputRenderSize(for: primarySize)
+    let outputSize = outputRenderSize(
+      for: previewSize.width > 0 && previewSize.height > 0 ? previewSize : primarySize
+    )
 
     let outputURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(
@@ -111,7 +117,8 @@ final class DualVideoComposer: NSObject {
       layout: layout,
       pipRect: pipRect,
       previewSize: previewSize,
-      primaryCamera: primaryCamera
+      primaryCamera: primaryCamera,
+      pipBorderVisible: pipBorderVisible
     )
 
     return outputURL
@@ -130,7 +137,8 @@ final class DualVideoComposer: NSObject {
     layout: String,
     pipRect: CGRect,
     previewSize: CGSize,
-    primaryCamera: String
+    primaryCamera: String,
+    pipBorderVisible: Bool
   ) throws {
     let rearReader = try AVAssetReader(asset: rearAsset)
     let frontReader = try AVAssetReader(asset: frontAsset)
@@ -224,10 +232,18 @@ final class DualVideoComposer: NSObject {
       mainDestination = outputRect
       insetDestination = mapPipRect(pipRect, from: previewSize, to: outputSize)
     }
+    let pipBorderImage =
+      layout == "pip" && pipBorderVisible
+      ? makePipBorderImage(destination: insetDestination, sourceRect: pipRect)
+      : nil
+    let pipMaskImage =
+      layout == "pip"
+      ? makePipMaskImage(destination: insetDestination, outputSize: outputSize)
+      : nil
 
     NSLog(
       """
-      DualVideoComposer render start version=track-transform-20260609-4 layout=\(layout) primary=\(primaryCamera)
+      DualVideoComposer render start version=track-transform-20260609-11 layout=\(layout) primary=\(primaryCamera) pipBorder=\(pipBorderVisible)
       output=\(formatSize(outputSize)) preview=\(formatSize(previewSize))
       mainDestination=\(formatRect(mainDestination)) insetDestination=\(formatRect(insetDestination))
       rear natural=\(formatSize(rearGeometry.naturalSize)) oriented=\(formatSize(rearGeometry.orientedSize)) preferred=\(formatTransform(rearGeometry.preferredTransform)) orientation=\(orientationText(rearGeometry.orientation))
@@ -292,18 +308,24 @@ final class DualVideoComposer: NSObject {
           destination: mainDestination,
           outputSize: outputSize
         )
-        let insetImage = renderImage(
+        let rawInsetImage = renderImage(
           from: insetBuffer,
           geometry: insetGeometry,
           destination: insetDestination,
           outputSize: outputSize
         )
+        let insetImage = clipPipImage(rawInsetImage, maskImage: pipMaskImage, outputSize: outputSize)
         if frameCount == 0 {
           let mainRawImage = CIImage(cvPixelBuffer: mainBuffer)
           let insetRawImage = CIImage(cvPixelBuffer: insetBuffer)
           let mainNormalizedImage = normalizedTrackImage(from: mainBuffer, geometry: mainGeometry)
           let insetNormalizedImage = normalizedTrackImage(from: insetBuffer, geometry: insetGeometry)
-          let composedImage = insetImage.composited(over: mainImage.composited(over: background))
+          let composedImage = composeLayers(
+            mainImage: mainImage,
+            insetImage: insetImage,
+            background: background,
+            pipBorderImage: pipBorderImage
+          )
           writeDebugImage(mainImage, name: "main-rendered", context: context, colorSpace: colorSpace)
           writeDebugImage(insetImage, name: "inset-rendered", context: context, colorSpace: colorSpace)
           writeDebugImage(composedImage, name: "composed", context: context, colorSpace: colorSpace)
@@ -319,7 +341,12 @@ final class DualVideoComposer: NSObject {
           )
           context.render(composedImage, to: outputBuffer, bounds: outputRect, colorSpace: colorSpace)
         } else {
-          let composedImage = insetImage.composited(over: mainImage.composited(over: background))
+          let composedImage = composeLayers(
+            mainImage: mainImage,
+            insetImage: insetImage,
+            background: background,
+            pipBorderImage: pipBorderImage
+          )
           context.render(composedImage, to: outputBuffer, bounds: outputRect, colorSpace: colorSpace)
         }
       }
@@ -363,6 +390,97 @@ final class DualVideoComposer: NSObject {
         userInfo: [NSLocalizedDescriptionKey: "Video writer failed: \(writer.error?.localizedDescription ?? "unknown")"]
       )
     }
+  }
+
+  private func composeLayers(
+    mainImage: CIImage,
+    insetImage: CIImage,
+    background: CIImage,
+    pipBorderImage: CIImage?
+  ) -> CIImage {
+    var composedImage = insetImage.composited(over: mainImage.composited(over: background))
+    if let pipBorderImage {
+      composedImage = pipBorderImage.composited(over: composedImage)
+    }
+    return composedImage
+  }
+
+  private func makePipBorderImage(destination: CGRect, sourceRect: CGRect) -> CIImage? {
+    guard destination.width > 0, destination.height > 0 else { return nil }
+
+    let scaleX = sourceRect.width > 0 ? destination.width / sourceRect.width : 1
+    let scaleY = sourceRect.height > 0 ? destination.height / sourceRect.height : scaleX
+    let borderWidth = max(2, min(scaleX, scaleY) * 2)
+    let size = CGSize(width: ceil(destination.width), height: ceil(destination.height))
+    let cornerRadius = min(destination.width, destination.height) * 0.22
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = false
+    let renderer = UIGraphicsImageRenderer(size: size, format: format)
+    let image = renderer.image { context in
+      UIColor.clear.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+
+      let outerRect = CGRect(origin: .zero, size: size)
+      let innerRect = outerRect.insetBy(dx: borderWidth, dy: borderWidth)
+      let outerPath = UIBezierPath(roundedRect: outerRect, cornerRadius: cornerRadius)
+      let innerPath = UIBezierPath(
+        roundedRect: innerRect,
+        cornerRadius: max(0, cornerRadius - borderWidth)
+      )
+      outerPath.append(innerPath)
+      outerPath.usesEvenOddFillRule = true
+
+      UIColor(white: 0, alpha: 0.38).setFill()
+      outerPath.fill()
+    }
+
+    guard let cgImage = image.cgImage else { return nil }
+    return CIImage(cgImage: cgImage).transformed(
+      by: CGAffineTransform(translationX: destination.minX, y: destination.minY)
+    )
+  }
+
+  private func makePipMaskImage(destination: CGRect, outputSize: CGSize) -> CIImage? {
+    guard destination.width > 0, destination.height > 0 else { return nil }
+
+    let size = CGSize(width: ceil(destination.width), height: ceil(destination.height))
+    let cornerRadius = min(destination.width, destination.height) * 0.22
+    let format = UIGraphicsImageRendererFormat.default()
+    format.scale = 1
+    format.opaque = false
+    let renderer = UIGraphicsImageRenderer(size: size, format: format)
+    let image = renderer.image { context in
+      UIColor.clear.setFill()
+      context.fill(CGRect(origin: .zero, size: size))
+
+      let path = UIBezierPath(
+        roundedRect: CGRect(origin: .zero, size: size),
+        cornerRadius: cornerRadius
+      )
+      UIColor.white.setFill()
+      path.fill()
+    }
+
+    guard let cgImage = image.cgImage else { return nil }
+    return CIImage(cgImage: cgImage)
+      .transformed(by: CGAffineTransform(translationX: destination.minX, y: destination.minY))
+      .cropped(to: CGRect(origin: .zero, size: outputSize))
+  }
+
+  private func clipPipImage(_ image: CIImage, maskImage: CIImage?, outputSize: CGSize) -> CIImage {
+    guard let maskImage else { return image }
+
+    let parameters: [String: Any] = [
+      kCIInputImageKey: image,
+      kCIInputBackgroundImageKey: maskImage,
+    ]
+    guard let filter = CIFilter(name: "CISourceInCompositing", parameters: parameters),
+      let outputImage = filter.outputImage else {
+      return image
+    }
+
+    return outputImage.cropped(to: CGRect(origin: .zero, size: outputSize))
   }
 
   private func renderImage(
