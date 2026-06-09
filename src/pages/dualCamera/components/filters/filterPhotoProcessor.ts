@@ -16,6 +16,11 @@ import {
 } from './filterRenderQualityPresets'
 import { blendModeMap, toColorWithOpacity } from './filterRenderingUtils'
 import {
+  hasProfessionalToneAdjustments,
+  mergeColorMatrixWithToneAdjustments,
+  type ProfessionalToneAdjustments,
+} from './toneAdjustments'
+import {
   fitSizeToAspectRatio,
   resolvePhotoOutputAspectRatio,
 } from '../photoOutputRatio'
@@ -95,19 +100,24 @@ export const drawFilteredImageRect = ({
   image,
   destRect,
   filterId,
+  toneAdjustments,
 }: {
   canvas: SkCanvas
   image: SkImage
   destRect: SkRect
   filterId: DualCameraFilterId
+  toneAdjustments?: ProfessionalToneAdjustments
 }) => {
   const filter = getDualCameraFilterPreset(filterId)
+  const matrix = toneAdjustments
+    ? mergeColorMatrixWithToneAdjustments(filter.photoMatrix, toneAdjustments)
+    : filter.photoMatrix
   const sourceRect = coverSourceRect(image, destRect)
   const paint = Skia.Paint()
   paint.setAntiAlias(true)
 
-  if (filter.photoMatrix) {
-    paint.setColorFilter(Skia.ColorFilter.MakeMatrix(filter.photoMatrix))
+  if (matrix) {
+    paint.setColorFilter(Skia.ColorFilter.MakeMatrix(matrix))
   }
 
   canvas.drawImageRect(image, sourceRect, destRect, paint, true)
@@ -133,14 +143,18 @@ export const applyFilterToPhoto = async (
   uri: string,
   filterId: DualCameraFilterId,
   renderQuality: DualCameraFilterRenderQuality,
+  toneAdjustments?: ProfessionalToneAdjustments,
   outputOptions?: {
     ratio?: string
     previewSize?: { width: number; height: number }
   },
 ) => {
   const outputAspectRatio = resolvePhotoOutputAspectRatio(outputOptions || {})
+  const hasTone = toneAdjustments
+    ? hasProfessionalToneAdjustments(toneAdjustments)
+    : false
 
-  if (filterId === 'none' && !outputAspectRatio) {
+  if (filterId === 'none' && !hasTone && !outputAspectRatio) {
     return uri
   }
 
@@ -168,6 +182,7 @@ export const applyFilterToPhoto = async (
         image,
         destRect,
         filterId,
+        toneAdjustments,
       })
 
       surface.flush()

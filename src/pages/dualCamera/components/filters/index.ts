@@ -14,3 +14,11 @@ export {
   applyFilterToPhoto,
   drawFilteredImageRect,
 } from './filterPhotoProcessor'
+export {
+  defaultProfessionalToneAdjustments,
+  formatToneAdjustmentValue,
+  hasProfessionalToneAdjustments,
+  professionalToneAdjustmentItems,
+  type ProfessionalToneAdjustmentKey,
+  type ProfessionalToneAdjustments,
+} from './toneAdjustments'

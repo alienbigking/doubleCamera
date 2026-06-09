@@ -9,6 +9,10 @@ import {
   type DualCameraFilterId,
 } from './filterPresets'
 import { blendModeMap, toColorWithOpacity } from './filterRenderingUtils'
+import {
+  mergeColorMatrixWithToneAdjustments,
+  type ProfessionalToneAdjustments,
+} from './toneAdjustments'
 
 export type RealtimeFilterRenderAssets = {
   matrix?: number[]
@@ -21,12 +25,17 @@ export type RealtimeFilterRenderAssets = {
 // 实时滤镜绘制配置：只保存可序列化数据，避免 SkPaint HostObject 跨帧复用后被释放。
 export const createRealtimeFilterRenderAssets = (
   filterId: DualCameraFilterId,
+  toneAdjustments: ProfessionalToneAdjustments,
 ): RealtimeFilterRenderAssets => {
   const filter = getDualCameraFilterPreset(filterId)
   const assets: RealtimeFilterRenderAssets = {}
+  const matrix = mergeColorMatrixWithToneAdjustments(
+    filter.photoMatrix,
+    toneAdjustments,
+  )
 
-  if (filter.photoMatrix) {
-    assets.matrix = filter.photoMatrix
+  if (matrix) {
+    assets.matrix = matrix
   }
 
   if (filter.photoBlend) {

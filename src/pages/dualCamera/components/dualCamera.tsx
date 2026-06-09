@@ -8,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  type GestureResponderEvent,
   type LayoutRectangle,
   View,
 } from 'react-native'
@@ -28,6 +29,7 @@ import {
   type CameraPreviewOutput,
   type CameraSession,
   type CameraVideoOutput,
+  type PreviewView,
   type Recorder,
   type Size,
 } from 'react-native-vision-camera'
@@ -75,8 +77,12 @@ import { composeDualPhoto } from './photoComposer'
 import { composeDualVideo } from './videoComposer'
 import {
   applyFilterToPhoto,
+  defaultProfessionalToneAdjustments,
+  hasProfessionalToneAdjustments,
   type DualCameraFilterId,
   type DualCameraFilterRenderQuality,
+  type ProfessionalToneAdjustmentKey,
+  type ProfessionalToneAdjustments,
 } from './filters'
 import {
   RealtimeFilteredPreviewSurface,
@@ -425,6 +431,8 @@ const DualCamera = () => {
     useState<DualCameraFilterId>('none')
   const [filterRenderQuality, setFilterRenderQuality] =
     useState<DualCameraFilterRenderQuality>('standard')
+  const [toneAdjustments, setToneAdjustments] =
+    useState<ProfessionalToneAdjustments>(defaultProfessionalToneAdjustments)
   const [captureTimerMode, setCaptureTimerMode] =
     useState<CaptureTimerMode>('off')
   const [focusLocked, setFocusLocked] = useState(false)
@@ -452,6 +460,7 @@ const DualCamera = () => {
   const [controlStatusMessage, setControlStatusMessage] = useState<
     string | null
   >(null)
+  const [tapFocusPoint, setTapFocusPoint] = useState<Point | null>(null)
   const [modeTransitionVisible, setModeTransitionVisible] = useState(false)
   const [pipPosition, setPipPosition] = useState<Point>(() => {
     const { width } = Dimensions.get('window')
@@ -464,6 +473,7 @@ const DualCamera = () => {
   const cameraPairRef = useRef<CameraPair | null>(null)
   const rearCameraControllerRef = useRef<CameraController | null>(null)
   const frontCameraControllerRef = useRef<CameraController | null>(null)
+  const primaryPreviewRef = useRef<PreviewView | null>(null)
   const photoOutputsRef = useRef<PhotoOutputs>({})
   const previewOutputsRef = useRef<PreviewOutputs>({})
   const videoOutputsRef = useRef<VideoOutputs>({})
@@ -482,19 +492,23 @@ const DualCamera = () => {
   const controlStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   )
+  const tapFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const pipPositionRef = useRef(pipPosition)
   const pipDragStartRef = useRef(pipPosition)
   const primaryViewportLayoutRef = useRef<LayoutRectangle | null>(null)
   const secondaryCamera: CameraSide =
     primaryCamera === 'rear' ? 'front' : 'rear'
   const isPip = layout === 'pip'
-  const realtimeFilterEnabled = mode === 'photo' && selectedFilterId !== 'none'
+  const toneAdjustmentsEnabled = hasProfessionalToneAdjustments(toneAdjustments)
+  const realtimeFilterEnabled =
+    mode === 'photo' && (selectedFilterId !== 'none' || toneAdjustmentsEnabled)
   const {
     frameOutputs: realtimeFilterFrameOutputs,
     textures: realtimeTextures,
   } = useRealtimeFilteredFrameOutputs({
     enabled: realtimeFilterEnabled,
     filterId: selectedFilterId,
+    toneAdjustments,
   })
 
   const loadCaptureAnalyticsStats = useCallback(async () => {
@@ -873,6 +887,7 @@ const DualCamera = () => {
       cameraPairRef.current = null
       rearCameraControllerRef.current = null
       frontCameraControllerRef.current = null
+      primaryPreviewRef.current = null
       previewOutputsRef.current = {}
       photoOutputsRef.current = {}
       videoOutputsRef.current = {}
@@ -885,6 +900,10 @@ const DualCamera = () => {
       if (session) {
         session.stop().catch(() => undefined)
       }
+      if (tapFocusTimerRef.current) {
+        clearTimeout(tapFocusTimerRef.current)
+        tapFocusTimerRef.current = null
+      }
     }
   }, [photoHDREnabled, realtimeFilterFrameOutputs])
 
@@ -896,6 +915,8 @@ const DualCamera = () => {
     return () => clearInterval(timer)
   }, [recording])
   const layoutLabel = layout === 'pip' ? '画中画' : '上下分屏'
+  const effectiveDualVideoComposeMode: DualVideoComposeMode =
+    layout === 'split' ? 'split' : 'pip'
   const primaryLabel = primaryCamera === 'rear' ? '后置主画面' : '前置主画面'
   const secondaryLabel = secondaryCamera === 'rear' ? '后置预览' : '前置预览'
   const previewStatusText = getCameraStatusText(previewStatus, previewError)
@@ -1307,6 +1328,7 @@ const DualCamera = () => {
     setPhotoHDREnabled(true)
     setLensSwitchHintEnabled(true)
     setVideoResolution('1080p')
+    setLayout('pip')
     setDualVideoComposeMode('pip')
     setVideoSaveMode('combined')
     setProVideoEnabled(false)
@@ -1320,6 +1342,7 @@ const DualCamera = () => {
     setSmoothFocusEnabled(true)
     setDistortionCorrectionEnabled(true)
     setCaptureAnalyticsEnabled(true)
+    setToneAdjustments(defaultProfessionalToneAdjustments)
     setCaptureTimerMode('off')
     setVideoCaptureReady(false)
     showControlStatusMessage('已恢复默认设置')
@@ -1419,6 +1442,21 @@ const DualCamera = () => {
     trackCaptureAction('filter', filterId)
   }
 
+  const updateToneAdjustment = (
+    key: ProfessionalToneAdjustmentKey,
+    value: number,
+  ) => {
+    setToneAdjustments(current => ({
+      ...current,
+      [key]: value,
+    }))
+  }
+
+  const resetToneAdjustments = () => {
+    setToneAdjustments(defaultProfessionalToneAdjustments)
+    showControlStatusMessage('调色参数已重置')
+  }
+
   const toggleProVideoSetting = (enabled: boolean) => {
     setProVideoEnabled(enabled)
     setVideoCaptureReady(false)
@@ -1499,6 +1537,78 @@ const DualCamera = () => {
       showControlStatusMessage('对焦锁定失败')
     }
   }
+
+  const setPrimaryPreviewRef = useCallback((preview: PreviewView | null) => {
+    primaryPreviewRef.current = preview
+  }, [])
+
+  const showTapFocusIndicator = useCallback((point: Point) => {
+    if (tapFocusTimerRef.current) {
+      clearTimeout(tapFocusTimerRef.current)
+    }
+    setTapFocusPoint(point)
+    tapFocusTimerRef.current = setTimeout(() => {
+      setTapFocusPoint(null)
+      tapFocusTimerRef.current = null
+    }, 900)
+  }, [])
+
+  const focusPrimaryCameraAtPoint = useCallback(
+    async (event: GestureResponderEvent) => {
+      if (previewStatus !== 'ready') return
+      if (proMode) {
+        showControlStatusMessage('专业模式下请使用手动对焦')
+        return
+      }
+
+      const controller =
+        primaryCamera === 'rear'
+          ? rearCameraControllerRef.current
+          : frontCameraControllerRef.current
+      const preview = primaryPreviewRef.current
+
+      if (!controller || !preview) return
+
+      const device = controller.device
+      const modes = [
+        device.supportsFocusMetering ? 'AF' : null,
+        device.supportsExposureMetering ? 'AE' : null,
+      ].filter((mode): mode is 'AF' | 'AE' => mode !== null)
+
+      if (modes.length === 0) {
+        showControlStatusMessage('当前设备不支持点按对焦')
+        return
+      }
+
+      const { locationX, locationY } = event.nativeEvent
+      showTapFocusIndicator({ x: locationX, y: locationY })
+
+      try {
+        const meteringPoint = preview.createMeteringPoint(
+          locationX,
+          locationY,
+          96,
+        )
+        controller
+          .focusTo(meteringPoint, {
+            responsiveness: mode === 'video' ? 'steady' : 'snappy',
+            adaptiveness: 'continuous',
+            modes,
+            autoResetAfter: 5,
+          })
+          .catch(error => {
+            console.info('Tap focus did not settle cleanly', error)
+          })
+        if (primaryCamera === 'rear') {
+          setFocusLocked(false)
+        }
+      } catch (error) {
+        console.warn('Tap to focus failed', error)
+        showControlStatusMessage('点按对焦失败')
+      }
+    },
+    [mode, previewStatus, primaryCamera, proMode, showTapFocusIndicator],
+  )
 
   const getExposureRange = (
     controller: CameraController | null,
@@ -1697,12 +1807,14 @@ const DualCamera = () => {
         photos.rear,
         selectedFilterId,
         filterRenderQuality,
+        toneAdjustments,
         outputOptions,
       ),
       applyFilterToPhoto(
         photos.front,
         selectedFilterId,
         filterRenderQuality,
+        toneAdjustments,
         outputOptions,
       ),
     ])
@@ -1738,6 +1850,7 @@ const DualCamera = () => {
       ratio,
       filterId: selectedFilterId,
       renderQuality: filterRenderQuality,
+      toneAdjustments,
       pipBorderVisible,
     })
     return CameraRoll.saveAsset(combinedPhotoUri, {
@@ -2089,6 +2202,19 @@ const DualCamera = () => {
     })
   }
 
+  const togglePreviewLayout = () => {
+    setLayout(value => {
+      const nextLayout = value === 'pip' ? 'split' : 'pip'
+      setDualVideoComposeMode(nextLayout)
+      return nextLayout
+    })
+  }
+
+  const selectDualVideoComposeMode = (value: DualVideoComposeMode) => {
+    setLayout(value)
+    setDualVideoComposeMode(value)
+  }
+
   const stopVideoRecording = async () => {
     if (!recording || recordingBusy) return
 
@@ -2182,7 +2308,7 @@ const DualCamera = () => {
         const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
         console.info('Saving dual video with native composer', {
           videoSaveMode,
-          dualVideoComposeMode,
+          dualVideoComposeMode: effectiveDualVideoComposeMode,
           primaryCamera,
           videoCount: videoFiles.length,
           previewSize,
@@ -2190,7 +2316,7 @@ const DualCamera = () => {
         })
         const combinedVideoUri = await composeDualVideo({
           videos: videoFiles,
-          layout: dualVideoComposeMode,
+          layout: effectiveDualVideoComposeMode,
           primaryCamera,
           pipPosition: localPipPosition,
           pipSize,
@@ -2240,7 +2366,7 @@ const DualCamera = () => {
         trackVideoSaved({
           resolution: videoResolution,
           saveMode: videoSaveMode,
-          composeMode: dualVideoComposeMode,
+          composeMode: effectiveDualVideoComposeMode,
           stabilizationMode,
           durationMs: Date.now() - saveStartedAt,
         }),
@@ -2302,14 +2428,21 @@ const DualCamera = () => {
       panel === 'proQuickIso' ||
       panel === 'proQuickShutter' ||
       panel === 'proQuickFocus')
-  const getRealtimePreviewContent = (side: CameraSide) =>
+  const getRealtimePreviewContent = (
+    side: CameraSide,
+    onPreviewRef?: (preview: PreviewView | null) => void,
+  ) =>
     realtimeFilterEnabled ? (
       <RealtimeFilteredPreviewSurface
         previewOutput={previewOutputs[side]}
         texture={realtimeTextures[side]}
+        onPreviewRef={onPreviewRef}
       />
     ) : undefined
-  const primaryPreviewContent = getRealtimePreviewContent(primaryCamera)
+  const primaryPreviewContent = getRealtimePreviewContent(
+    primaryCamera,
+    setPrimaryPreviewRef,
+  )
   const secondaryPreviewContent = getRealtimePreviewContent(secondaryCamera)
 
   return (
@@ -2334,6 +2467,9 @@ const DualCamera = () => {
               focusLocked={focusLocked}
               onUnlockFocus={toggleFocusLock}
               onViewportLayout={handlePrimaryViewportLayout}
+              onPreviewRef={setPrimaryPreviewRef}
+              onTapFocus={focusPrimaryCameraAtPoint}
+              tapFocusPoint={tapFocusPoint}
             />
             <View style={styles.splitDivider} />
             <CameraPane
@@ -2357,6 +2493,9 @@ const DualCamera = () => {
             focusLocked={focusLocked}
             onUnlockFocus={toggleFocusLock}
             onViewportLayout={handlePrimaryViewportLayout}
+            onPreviewRef={setPrimaryPreviewRef}
+            onTapFocus={focusPrimaryCameraAtPoint}
+            tapFocusPoint={tapFocusPoint}
             full
           />
         )}
@@ -2520,9 +2659,7 @@ const DualCamera = () => {
               flashModeTransition(() => setMode('photo'))
             }}
             onSetVideoMode={enterVideoMode}
-            onToggleLayout={() =>
-              setLayout(value => (value === 'pip' ? 'split' : 'pip'))
-            }
+            onToggleLayout={togglePreviewLayout}
             onOpenGallery={openGallery}
             onFlipPrimaryCamera={() =>
               setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
@@ -2560,12 +2697,15 @@ const DualCamera = () => {
             shutterDuration={proShutterDuration}
             shutterOptions={professionalShutterOptions}
             focusPosition={proFocusPosition}
+            toneAdjustments={toneAdjustments}
             onToggleEnabled={toggleProfessionalMode}
             onPreviewISO={previewProfessionalISO}
             onCommitISO={commitProfessionalISO}
             onSelectShutter={selectProfessionalShutter}
             onPreviewFocusPosition={previewProfessionalFocusPosition}
             onCommitFocusPosition={commitProfessionalFocusPosition}
+            onChangeToneAdjustment={updateToneAdjustment}
+            onResetToneAdjustments={resetToneAdjustments}
             onBack={() => setPanel('menu')}
             onClose={() => setPanel(null)}
           />
@@ -2642,7 +2782,7 @@ const DualCamera = () => {
             photoHDRSupported={photoHDRSupported}
             lensSwitchHintEnabled={lensSwitchHintEnabled}
             videoResolution={videoResolution}
-            dualVideoComposeMode={dualVideoComposeMode}
+            dualVideoComposeMode={effectiveDualVideoComposeMode}
             videoSaveMode={videoSaveMode}
             proVideoEnabled={proVideoEnabled}
             volumeShutterEnabled={volumeShutterEnabled}
@@ -2656,7 +2796,7 @@ const DualCamera = () => {
             onTogglePhotoHDR={togglePhotoHDRSetting}
             onToggleLensSwitchHint={setLensSwitchHintEnabled}
             onSetVideoResolution={selectVideoResolution}
-            onSetDualVideoComposeMode={setDualVideoComposeMode}
+            onSetDualVideoComposeMode={selectDualVideoComposeMode}
             onSetVideoSaveMode={setVideoSaveMode}
             onToggleProVideo={toggleProVideoSetting}
             onToggleVolumeShutter={toggleVolumeShutterSetting}

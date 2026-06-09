@@ -221,10 +221,15 @@ final class DualVideoComposer: NSObject {
     let mainDestination: CGRect
     let insetDestination: CGRect
     if layout == "split" {
-      mainDestination = CGRect(x: 0, y: 0, width: outputSize.width, height: outputSize.height / 2)
-      insetDestination = CGRect(
+      mainDestination = CGRect(
         x: 0,
         y: outputSize.height / 2,
+        width: outputSize.width,
+        height: outputSize.height / 2
+      )
+      insetDestination = CGRect(
+        x: 0,
+        y: 0,
         width: outputSize.width,
         height: outputSize.height / 2
       )

@@ -9,7 +9,10 @@ import {
 } from 'react-native-vision-camera'
 import { renderToTexture } from 'react-native-vision-camera-skia'
 import { scheduleOnRN } from 'react-native-worklets'
-import type { DualCameraFilterId } from '../filters'
+import type {
+  DualCameraFilterId,
+  ProfessionalToneAdjustments,
+} from '../filters'
 import {
   createRealtimeFilterRenderAssets,
   drawRealtimeFilteredFrame,
@@ -22,6 +25,7 @@ type FrameTextures = Record<CameraSide, SharedValue<SkImage | null>>
 type UseRealtimeFilteredFrameOutputsOptions = {
   enabled: boolean
   filterId: DualCameraFilterId
+  toneAdjustments: ProfessionalToneAdjustments
 }
 
 type UseRealtimeFilteredFrameOutputsResult = {
@@ -33,6 +37,7 @@ type UseRealtimeFilteredFrameOutputsResult = {
 export const useRealtimeFilteredFrameOutputs = ({
   enabled,
   filterId,
+  toneAdjustments,
 }: UseRealtimeFilteredFrameOutputsOptions): UseRealtimeFilteredFrameOutputsResult => {
   const rearTexture = useSharedValue<SkImage | null>(null)
   const frontTexture = useSharedValue<SkImage | null>(null)
@@ -46,8 +51,8 @@ export const useRealtimeFilteredFrameOutputs = ({
   )
 
   const renderAssets = useMemo(
-    () => createRealtimeFilterRenderAssets(filterId),
-    [filterId],
+    () => createRealtimeFilterRenderAssets(filterId, toneAdjustments),
+    [filterId, toneAdjustments],
   )
 
   const updatePreviewTexture = useCallback(

@@ -7,17 +7,20 @@ import {
   type SharedValue,
 } from 'react-native-reanimated'
 import type { CameraPreviewOutput } from 'react-native-vision-camera'
+import type { PreviewView } from 'react-native-vision-camera'
 import { CameraPreviewSurface } from '../cameraPreview'
 
 type RealtimeFilteredPreviewSurfaceProps = {
   previewOutput?: CameraPreviewOutput
   texture: SharedValue<SkImage | null>
+  onPreviewRef?: (preview: PreviewView | null) => void
 }
 
 // 主画面实时滤镜预览组件：底层保留原生预览，Skia 画布只负责覆盖已经渲染好的实时滤镜纹理。
 export const RealtimeFilteredPreviewSurface = ({
   previewOutput,
   texture,
+  onPreviewRef,
 }: RealtimeFilteredPreviewSurfaceProps) => {
   const canvasSize = useSharedValue({ width: 0, height: 0 })
   const canvasRect = useDerivedValue(() => ({
@@ -29,7 +32,10 @@ export const RealtimeFilteredPreviewSurface = ({
 
   return (
     <View style={styles.root}>
-      <CameraPreviewSurface previewOutput={previewOutput} />
+      <CameraPreviewSurface
+        previewOutput={previewOutput}
+        onPreviewRef={onPreviewRef}
+      />
       <Canvas pointerEvents="none" style={styles.canvas} onSize={canvasSize}>
         <Image image={texture} rect={canvasRect} fit="cover" />
       </Canvas>

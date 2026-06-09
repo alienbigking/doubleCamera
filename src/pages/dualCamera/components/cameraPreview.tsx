@@ -1,10 +1,23 @@
-import React, { type ReactNode } from 'react'
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
-import type { LayoutRectangle, StyleProp, ViewStyle } from 'react-native'
+import React, { type ReactNode, useMemo } from 'react'
+import {
+  Pressable,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native'
+import type {
+  GestureResponderEvent,
+  LayoutRectangle,
+  StyleProp,
+  ViewStyle,
+} from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { callback } from 'react-native-nitro-modules'
 import {
   NativePreviewView,
   type CameraPreviewOutput,
+  type PreviewView,
 } from 'react-native-vision-camera'
 
 const compactCornerRadius = 32
@@ -31,6 +44,9 @@ export const CameraPane = ({
   focusLocked,
   onUnlockFocus,
   onViewportLayout,
+  onPreviewRef,
+  onTapFocus,
+  tapFocusPoint,
 }: {
   label: string
   full?: boolean
@@ -43,6 +59,9 @@ export const CameraPane = ({
   focusLocked?: boolean
   onUnlockFocus?: () => void
   onViewportLayout?: (layout: LayoutRectangle) => void
+  onPreviewRef?: (preview: PreviewView | null) => void
+  onTapFocus?: (event: GestureResponderEvent) => void
+  tapFocusPoint?: { x: number; y: number } | null
 }) => {
   const aspectRatio = getAspectRatio(ratio)
 
@@ -64,7 +83,10 @@ export const CameraPane = ({
         onLayout={event => onViewportLayout?.(event.nativeEvent.layout)}
       >
         {previewContent || (
-          <CameraPreviewSurface previewOutput={previewOutput} />
+          <CameraPreviewSurface
+            previewOutput={previewOutput}
+            onPreviewRef={onPreviewRef}
+          />
         )}
         {gridEnabled && (
           <View style={styles.gridOverlay}>
@@ -75,6 +97,14 @@ export const CameraPane = ({
           </View>
         )}
         {focusLocked && <FocusLockIndicator onUnlockFocus={onUnlockFocus} />}
+        {tapFocusPoint && <TapFocusIndicator point={tapFocusPoint} />}
+        {onTapFocus && (
+          <Pressable
+            style={styles.tapFocusLayer}
+            onPress={onTapFocus}
+            pointerEvents="box-only"
+          />
+        )}
         <Text style={styles.cameraLabel}>{label}</Text>
       </View>
       {statusText && (
@@ -109,15 +139,43 @@ const FocusLockIndicator = ({
   </View>
 )
 
+const TapFocusIndicator = ({ point }: { point: { x: number; y: number } }) => (
+  <View
+    pointerEvents="none"
+    style={[
+      styles.tapFocusIndicator,
+      {
+        left: point.x - tapFocusIndicatorSize / 2,
+        top: point.y - tapFocusIndicatorSize / 2,
+      },
+    ]}
+  >
+    <View style={[styles.tapFocusCorner, styles.tapFocusCornerTopLeft]} />
+    <View style={[styles.tapFocusCorner, styles.tapFocusCornerTopRight]} />
+    <View style={[styles.tapFocusCorner, styles.tapFocusCornerBottomLeft]} />
+    <View style={[styles.tapFocusCorner, styles.tapFocusCornerBottomRight]} />
+  </View>
+)
+
 export const CameraPreviewSurface = ({
   previewOutput,
   compact,
   style,
+  onPreviewRef,
 }: {
   previewOutput?: CameraPreviewOutput
   compact?: boolean
   style?: StyleProp<ViewStyle>
+  onPreviewRef?: (preview: PreviewView | null) => void
 }) => {
+  const previewHybridRef = useMemo(
+    () =>
+      callback((preview: PreviewView | null) => {
+        onPreviewRef?.(preview)
+      }),
+    [onPreviewRef],
+  )
+
   if (!previewOutput) {
     return (
       <View
@@ -150,6 +208,7 @@ export const CameraPreviewSurface = ({
         <NativePreviewView
           style={[styles.nativePreview, compact && styles.nativePreviewCompact]}
           previewOutput={previewOutput}
+          hybridRef={previewHybridRef}
           resizeMode="cover"
           implementationMode="compatible"
         />
@@ -171,6 +230,8 @@ const CameraTexture = ({
     <View style={styles.lightBand} />
   </View>
 )
+
+const tapFocusIndicatorSize = 78
 
 const styles = StyleSheet.create({
   cameraPane: {
@@ -229,8 +290,49 @@ const styles = StyleSheet.create({
     transform: [{ rotate: '-2deg' }],
   },
   gridOverlay: { ...StyleSheet.absoluteFillObject, opacity: 0.26 },
+  tapFocusLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 8,
+  },
+  tapFocusIndicator: {
+    position: 'absolute',
+    zIndex: 9,
+    width: tapFocusIndicatorSize,
+    height: tapFocusIndicatorSize,
+  },
+  tapFocusCorner: {
+    position: 'absolute',
+    width: 20,
+    height: 20,
+    borderColor: '#ffe66d',
+  },
+  tapFocusCornerTopLeft: {
+    top: 0,
+    left: 0,
+    borderTopWidth: 2,
+    borderLeftWidth: 2,
+  },
+  tapFocusCornerTopRight: {
+    top: 0,
+    right: 0,
+    borderTopWidth: 2,
+    borderRightWidth: 2,
+  },
+  tapFocusCornerBottomLeft: {
+    bottom: 0,
+    left: 0,
+    borderBottomWidth: 2,
+    borderLeftWidth: 2,
+  },
+  tapFocusCornerBottomRight: {
+    right: 0,
+    bottom: 0,
+    borderRightWidth: 2,
+    borderBottomWidth: 2,
+  },
   focusLockIndicator: {
     position: 'absolute',
+    zIndex: 10,
     alignSelf: 'center',
     top: '42%',
     width: 116,

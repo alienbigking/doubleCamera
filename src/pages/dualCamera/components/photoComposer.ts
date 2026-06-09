@@ -12,6 +12,7 @@ import {
   getDualCameraFilterRenderQualityPreset,
   type DualCameraFilterId,
   type DualCameraFilterRenderQuality,
+  type ProfessionalToneAdjustments,
 } from './filters'
 import {
   fitSizeToAspectRatio,
@@ -33,6 +34,7 @@ export type ComposePhotoOptions = {
   ratio: string
   filterId: DualCameraFilterId
   renderQuality: DualCameraFilterRenderQuality
+  toneAdjustments?: ProfessionalToneAdjustments
   pipBorderVisible?: boolean
 }
 
@@ -95,6 +97,7 @@ export const composeDualPhoto = async ({
   ratio,
   filterId,
   renderQuality,
+  toneAdjustments,
   pipBorderVisible = true,
 }: ComposePhotoOptions) => {
   const secondaryCamera: CameraSide =
@@ -154,12 +157,14 @@ export const composeDualPhoto = async ({
           image: primaryImage,
           destRect: topRect,
           filterId,
+          toneAdjustments,
         })
         drawFilteredImageRect({
           canvas,
           image: secondaryImage,
           destRect: bottomRect,
           filterId,
+          toneAdjustments,
         })
       } else {
         const mainRect = Skia.XYWHRect(
@@ -173,6 +178,7 @@ export const composeDualPhoto = async ({
           image: primaryImage,
           destRect: mainRect,
           filterId,
+          toneAdjustments,
         })
 
         const scaleX = canvasSize.width / previewSize.width
@@ -204,6 +210,7 @@ export const composeDualPhoto = async ({
           image: secondaryImage,
           destRect: insetRect,
           filterId,
+          toneAdjustments,
         })
         canvas.restore()
 
