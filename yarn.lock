@@ -1507,6 +1507,11 @@
   resolved "https://registry.npmmirror.com/@react-native-camera-roll/camera-roll/-/camera-roll-7.10.2.tgz"
   integrity sha512-XgJQJDFUycmqSX+MH7vTcRigQwEIQNLIu1GvOngCZRwlSV2mF61UzeruSmmHwkBcGnHZFXkKg9fil0FQVfyglw==
 
+"@react-native-community/blur@^4.4.1":
+  version "4.4.1"
+  resolved "https://registry.npmmirror.com/@react-native-community/blur/-/blur-4.4.1.tgz"
+  integrity sha512-XBSsRiYxE/MOEln2ayunShfJtWztHwUxLFcSL20o+HNNRnuUDv+GXkF6FmM2zE8ZUfrnhQ/zeTqvnuDPGw6O8A==
+
 "@react-native-community/cli-clean@20.0.0":
   version "20.0.0"
   resolved "https://registry.npmmirror.com/@react-native-community/cli-clean/-/cli-clean-20.0.0.tgz"
@@ -1949,6 +1954,11 @@
   version "1.4.0"
   resolved "https://registry.npmmirror.com/@sayem314/react-native-keep-awake/-/react-native-keep-awake-1.4.0.tgz"
   integrity sha512-EOg6im5sSuwPC3hamXjW2kb6KB1HuluivdGzjvIRAeeEH7cVyaBTcSaV3SZerQRImTxoaVLMnD1FOEyQQK6etg==
+
+"@sbaiahmed1/react-native-blur@^4.6.3":
+  version "4.6.3"
+  resolved "https://registry.npmmirror.com/@sbaiahmed1/react-native-blur/-/react-native-blur-4.6.3.tgz"
+  integrity sha512-rPQBhd2aAI1ejjqImva1M1eAeZo74eTU4wT7xSwVkD2h5cI2QygjCp0lvAoBvfqiWqGAAeDd/Blrpf88TWWBxA==
 
 "@shopify/react-native-skia@*", "@shopify/react-native-skia@^2.6.2":
   version "2.6.4"

@@ -17,6 +17,7 @@ import {
   iosRequestReadWriteGalleryPermission,
 } from '@react-native-camera-roll/camera-roll'
 import RNFS from 'react-native-fs'
+import LinearGradient from 'react-native-linear-gradient'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import {
   CommonResolutions,
@@ -69,6 +70,7 @@ import {
 } from './cameraControls'
 import { GalleryModal, type GalleryAsset } from './overlays'
 import { CameraPane, CameraPreviewSurface } from './cameraPreview'
+import { NativeBlurView } from './nativeBlurView'
 import { composeDualPhoto } from './photoComposer'
 import { composeDualVideo } from './videoComposer'
 import {
@@ -450,6 +452,7 @@ const DualCamera = () => {
   const [controlStatusMessage, setControlStatusMessage] = useState<
     string | null
   >(null)
+  const [modeTransitionVisible, setModeTransitionVisible] = useState(false)
   const [pipPosition, setPipPosition] = useState<Point>(() => {
     const { width } = Dimensions.get('window')
     return {
@@ -468,6 +471,9 @@ const DualCamera = () => {
   const recordersRef = useRef<Recorders>({})
   const recordingFinishedRef = useRef<Promise<RecordedVideo>[]>([])
   const captureBusyRef = useRef(false)
+  const videoConfigurePromiseRef = useRef<Promise<boolean> | null>(null)
+  const modeTransitionOpacity = useRef(new Animated.Value(0)).current
+  const modeTransitionScale = useRef(new Animated.Value(1)).current
   const captureFlashOpacity = useRef(new Animated.Value(0)).current
   const shutterScale = useRef(new Animated.Value(1)).current
   const saveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -1003,6 +1009,55 @@ const DualCamera = () => {
     }, 1000)
   }
 
+  const showModeTransition = () =>
+    new Promise<void>(resolve => {
+      modeTransitionOpacity.stopAnimation()
+      modeTransitionScale.stopAnimation()
+      modeTransitionOpacity.setValue(0)
+      modeTransitionScale.setValue(1)
+      setModeTransitionVisible(true)
+      Animated.parallel([
+        Animated.timing(modeTransitionOpacity, {
+          toValue: 1,
+          duration: 110,
+          useNativeDriver: true,
+        }),
+        Animated.timing(modeTransitionScale, {
+          toValue: 0.985,
+          duration: 110,
+          useNativeDriver: true,
+        }),
+      ]).start(() => resolve())
+    })
+
+  const hideModeTransition = () => {
+    Animated.parallel([
+      Animated.timing(modeTransitionOpacity, {
+        toValue: 0,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+      Animated.timing(modeTransitionScale, {
+        toValue: 1,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+    ]).start(({ finished }) => {
+      if (finished) {
+        setModeTransitionVisible(false)
+      }
+    })
+  }
+
+  const flashModeTransition = async (work: () => Promise<void> | void) => {
+    await showModeTransition()
+    try {
+      await work()
+    } finally {
+      hideModeTransition()
+    }
+  }
+
   const applyAiEnhancementSettings = async (
     controller = rearCameraControllerRef.current,
   ) => {
@@ -1376,7 +1431,7 @@ const DualCamera = () => {
 
   const togglePipBorderSetting = (enabled: boolean) => {
     setPipBorderVisible(enabled)
-    showControlStatusMessage(enabled ? '小窗白边已显示' : '小窗白边已隐藏')
+    showControlStatusMessage(enabled ? '小窗边框已显示' : '小窗边框已隐藏')
   }
 
   const toggleCaptureAnalyticsSetting = (enabled: boolean) => {
@@ -1813,26 +1868,29 @@ const DualCamera = () => {
 
   const configureVideoSession = async () => {
     if (videoCaptureReady) return true
-
-    const session = cameraSessionRef.current
-    const cameraPair = cameraPairRef.current
-    const rearPreviewOutput = previewOutputsRef.current.rear
-    const frontPreviewOutput = previewOutputsRef.current.front
-    const rearPhotoOutput = photoOutputsRef.current.rear
-    const frontPhotoOutput = photoOutputsRef.current.front
-
-    if (
-      !session ||
-      !cameraPair ||
-      !rearPreviewOutput ||
-      !frontPreviewOutput ||
-      !rearPhotoOutput ||
-      !frontPhotoOutput
-    ) {
-      return false
+    if (videoConfigurePromiseRef.current) {
+      return videoConfigurePromiseRef.current
     }
 
-    try {
+    const configurePromise = (async () => {
+      const session = cameraSessionRef.current
+      const cameraPair = cameraPairRef.current
+      const rearPreviewOutput = previewOutputsRef.current.rear
+      const frontPreviewOutput = previewOutputsRef.current.front
+      const rearPhotoOutput = photoOutputsRef.current.rear
+      const frontPhotoOutput = photoOutputsRef.current.front
+
+      if (
+        !session ||
+        !cameraPair ||
+        !rearPreviewOutput ||
+        !frontPreviewOutput ||
+        !rearPhotoOutput ||
+        !frontPhotoOutput
+      ) {
+        return false
+      }
+
       const selectedVideoConfig = videoResolutionConfig[videoResolution]
       const rearVideoOutput = VisionCamera.createVideoOutput({
         targetResolution: selectedVideoConfig.resolution,
@@ -1887,6 +1945,7 @@ const DualCamera = () => {
           constraints: frontConstraints,
         },
       ])
+      await session.start()
 
       videoOutputsRef.current = {
         rear: rearVideoOutput,
@@ -1939,6 +1998,12 @@ const DualCamera = () => {
       }
       setVideoCaptureReady(true)
       return true
+    })()
+
+    videoConfigurePromiseRef.current = configurePromise
+
+    try {
+      return await configurePromise
     } catch (error) {
       console.warn('Configure dual video session failed', error)
       videoOutputsRef.current = {}
@@ -1947,6 +2012,10 @@ const DualCamera = () => {
         setStabilizationMode('off')
       }
       return false
+    } finally {
+      if (videoConfigurePromiseRef.current === configurePromise) {
+        videoConfigurePromiseRef.current = null
+      }
     }
   }
 
@@ -2008,37 +2077,17 @@ const DualCamera = () => {
     }
   }
 
-  useEffect(() => {
-    if (
-      mode !== 'video' ||
-      previewStatus !== 'ready' ||
-      recording ||
-      videoCaptureReady
-    ) {
-      return
-    }
+  const enterVideoMode = () => {
+    flashModeTransition(async () => {
+      setMode('video')
+      if (previewStatus !== 'ready' || recording || videoCaptureReady) return
 
-    let cancelled = false
-    configureVideoSession().then(configured => {
-      if (!cancelled && configured) {
+      const configured = await configureVideoSession()
+      if (configured) {
         showControlStatusMessage('录像已就绪')
       }
     })
-
-    return () => {
-      cancelled = true
-    }
-  }, [
-    mode,
-    previewStatus,
-    videoCaptureReady,
-    videoResolution,
-    stabilizationMode,
-    proVideoEnabled,
-    proMode,
-    selectedLensId,
-    recording,
-  ])
+  }
 
   const stopVideoRecording = async () => {
     if (!recording || recordingBusy) return
@@ -2265,7 +2314,14 @@ const DualCamera = () => {
 
   return (
     <View style={styles.root}>
-      <View style={styles.preview}>
+      <Animated.View
+        style={[
+          styles.preview,
+          {
+            transform: [{ scale: modeTransitionScale }],
+          },
+        ]}
+      >
         {layout === 'split' ? (
           <>
             <CameraPane
@@ -2461,9 +2517,9 @@ const DualCamera = () => {
               if (recording) {
                 stopVideoRecording()
               }
-              setMode('photo')
+              flashModeTransition(() => setMode('photo'))
             }}
-            onSetVideoMode={() => setMode('video')}
+            onSetVideoMode={enterVideoMode}
             onToggleLayout={() =>
               setLayout(value => (value === 'pip' ? 'split' : 'pip'))
             }
@@ -2671,7 +2727,7 @@ const DualCamera = () => {
             onClose={() => setPanel('quick')}
           />
         )}
-      </View>
+      </Animated.View>
 
       <Animated.View
         pointerEvents="none"
@@ -2687,6 +2743,36 @@ const DualCamera = () => {
         message={controlStatusMessage}
         bottom={insets.bottom + 224}
       />
+      {modeTransitionVisible && (
+        <Animated.View
+          pointerEvents="none"
+          style={[
+            styles.modeTransitionOverlay,
+            {
+              opacity: modeTransitionOpacity,
+            },
+          ]}
+        >
+          <View style={styles.modeTransitionTint} />
+          <NativeBlurView
+            blurAmount={18}
+            blurStyle="systemMaterialDark"
+            style={StyleSheet.absoluteFillObject}
+          />
+          <LinearGradient
+            colors={[
+              'rgba(255,255,255,0.16)',
+              'rgba(255,255,255,0.04)',
+              'rgba(0,0,0,0.12)',
+            ]}
+            locations={[0, 0.42, 1]}
+            start={{ x: 0.12, y: 0 }}
+            end={{ x: 0.88, y: 1 }}
+            style={StyleSheet.absoluteFillObject}
+          />
+          <View style={styles.modeTransitionSheen} />
+        </Animated.View>
+      )}
       <GalleryModal
         visible={galleryOpen}
         assets={galleryAssets}
@@ -2703,6 +2789,24 @@ const styles = StyleSheet.create({
   panelDismissLayer: {
     ...StyleSheet.absoluteFillObject,
     zIndex: 30,
+  },
+  modeTransitionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 200,
+    elevation: 200,
+  },
+  modeTransitionTint: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(4,5,7,0.32)',
+  },
+  modeTransitionSheen: {
+    position: 'absolute',
+    top: '10%',
+    left: '-18%',
+    width: '140%',
+    height: '30%',
+    backgroundColor: 'rgba(255,255,255,0.09)',
+    transform: [{ rotate: '-16deg' }],
   },
   splitDivider: { height: 2, backgroundColor: 'rgba(255,255,255,0.16)' },
   pip: {
