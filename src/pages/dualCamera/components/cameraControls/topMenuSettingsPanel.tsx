@@ -3,16 +3,29 @@ import { ScrollView, StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
 import { ModeButton, ToggleRow } from '../controls'
 import type {
+  AudioChannelMode,
+  AudioQualityMode,
   DualVideoComposeMode,
+  VideoFrameRateMode,
   VideoResolutionMode,
   VideoSaveMode,
 } from './types'
 import { TopMenuPanelShell } from './topMenuPanelShell'
 
-const formatVideoResolution = (mode: VideoResolutionMode) => {
-  if (mode === '720p') return '720p 30fps'
-  if (mode === '4k') return '4K 30fps'
-  return '1080p 30fps'
+const formatVideoResolution = (mode: VideoResolutionMode) =>
+  mode === '4k' ? '1080p' : mode
+
+const formatVideoFrameRate = (fps: VideoFrameRateMode) => `${fps}fps`
+const formatAudioChannel = (mode: AudioChannelMode) => {
+  if (mode === 'off') return '关闭'
+  if (mode === 'mono') return '单声道'
+  return '立体声'
+}
+
+const formatAudioQuality = (mode: AudioQualityMode) => {
+  if (mode === 'high') return '高清'
+  if (mode === 'max') return '原声'
+  return '标准'
 }
 
 const formatComposeMode = (mode: DualVideoComposeMode) =>
@@ -33,10 +46,15 @@ export const TopMenuSettingsPanel = ({
   photoHDRSupported,
   lensSwitchHintEnabled,
   videoResolution,
+  videoFrameRate,
+  videoFrameRateOptions,
+  audioChannelMode,
+  audioQualityMode,
   dualVideoComposeMode,
   videoSaveMode,
   proVideoEnabled,
   volumeShutterEnabled,
+  saveLocationEnabled,
   pipBorderVisible,
   reduceTransparencyEnabled,
   flashIndicatorEnabled,
@@ -47,10 +65,14 @@ export const TopMenuSettingsPanel = ({
   onTogglePhotoHDR,
   onToggleLensSwitchHint,
   onSetVideoResolution,
+  onSetVideoFrameRate,
+  onSetAudioChannelMode,
+  onSetAudioQualityMode,
   onSetDualVideoComposeMode,
   onSetVideoSaveMode,
   onToggleProVideo,
   onToggleVolumeShutter,
+  onToggleSaveLocation,
   onTogglePipBorder,
   onToggleReduceTransparency,
   onToggleFlashIndicator,
@@ -66,10 +88,15 @@ export const TopMenuSettingsPanel = ({
   photoHDRSupported: boolean
   lensSwitchHintEnabled: boolean
   videoResolution: VideoResolutionMode
+  videoFrameRate: VideoFrameRateMode
+  videoFrameRateOptions: VideoFrameRateMode[]
+  audioChannelMode: AudioChannelMode
+  audioQualityMode: AudioQualityMode
   dualVideoComposeMode: DualVideoComposeMode
   videoSaveMode: VideoSaveMode
   proVideoEnabled: boolean
   volumeShutterEnabled: boolean
+  saveLocationEnabled: boolean
   pipBorderVisible: boolean
   reduceTransparencyEnabled: boolean
   flashIndicatorEnabled: boolean
@@ -80,10 +107,14 @@ export const TopMenuSettingsPanel = ({
   onTogglePhotoHDR: (value: boolean) => void
   onToggleLensSwitchHint: (value: boolean) => void
   onSetVideoResolution: (mode: VideoResolutionMode) => void
+  onSetVideoFrameRate: (fps: VideoFrameRateMode) => void
+  onSetAudioChannelMode: (mode: AudioChannelMode) => void
+  onSetAudioQualityMode: (mode: AudioQualityMode) => void
   onSetDualVideoComposeMode: (mode: DualVideoComposeMode) => void
   onSetVideoSaveMode: (mode: VideoSaveMode) => void
   onToggleProVideo: (value: boolean) => void
   onToggleVolumeShutter: (value: boolean) => void
+  onToggleSaveLocation: (value: boolean) => void
   onTogglePipBorder: (value: boolean) => void
   onToggleReduceTransparency: (value: boolean) => void
   onToggleFlashIndicator: (value: boolean) => void
@@ -143,10 +174,41 @@ export const TopMenuSettingsPanel = ({
           options={[
             { label: '720p', value: '720p' },
             { label: '1080p', value: '1080p' },
-            { label: '4K', value: '4k' },
           ]}
           selectedValue={videoResolution}
           onSelect={value => onSetVideoResolution(value as VideoResolutionMode)}
+        />
+        <ChoiceRow
+          label="帧率"
+          value={formatVideoFrameRate(videoFrameRate)}
+          options={videoFrameRateOptions.map(option => ({
+            label: `${option}fps`,
+            value: option,
+          }))}
+          selectedValue={videoFrameRate}
+          onSelect={value => onSetVideoFrameRate(value as VideoFrameRateMode)}
+        />
+        <ChoiceRow
+          label="音频声道"
+          value={formatAudioChannel(audioChannelMode)}
+          options={[
+            { label: '关闭', value: 'off' },
+            { label: '单声道', value: 'mono' },
+            { label: '立体声', value: 'stereo' },
+          ]}
+          selectedValue={audioChannelMode}
+          onSelect={value => onSetAudioChannelMode(value as AudioChannelMode)}
+        />
+        <ChoiceRow
+          label="音频质量"
+          value={formatAudioQuality(audioQualityMode)}
+          options={[
+            { label: '标准', value: 'standard' },
+            { label: '高清', value: 'high' },
+            { label: '原声', value: 'max' },
+          ]}
+          selectedValue={audioQualityMode}
+          onSelect={value => onSetAudioQualityMode(value as AudioQualityMode)}
         />
         <ChoiceRow
           label="双视频合成"
@@ -187,7 +249,19 @@ export const TopMenuSettingsPanel = ({
           onValueChange={onToggleVolumeShutter}
         />
         <ToggleRow
-          icon={<MaterialIcons name="picture-in-picture-alt" color="#fff" size={20} />}
+          icon={<MaterialIcons name="place" color="#fff" size={20} />}
+          label="保存位置信息"
+          value={saveLocationEnabled}
+          onValueChange={onToggleSaveLocation}
+        />
+        <ToggleRow
+          icon={
+            <MaterialIcons
+              name="picture-in-picture-alt"
+              color="#fff"
+              size={20}
+            />
+          }
           label="小窗白色边框"
           value={pipBorderVisible}
           onValueChange={onTogglePipBorder}
@@ -246,9 +320,9 @@ const ChoiceRow = ({
 }: {
   label: string
   value: string
-  options: Array<{ label: string; value: string }>
-  selectedValue: string
-  onSelect: (value: string) => void
+  options: Array<{ label: string; value: string | number }>
+  selectedValue: string | number
+  onSelect: (value: string | number) => void
 }) => (
   <View style={styles.choiceRow}>
     <View style={styles.choiceHeader}>

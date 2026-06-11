@@ -8,13 +8,13 @@ import {
 } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
 import { SafeAreaView } from 'react-native-safe-area-context'
-import { ModeButton } from '../controls'
 import type { CaptureMode } from './types'
 
 // 底部拍摄控制栏组件：承载模式切换、布局切换、快门、相册和更多入口。
 export const BottomCameraToolbar = ({
   mode,
   layoutLabel,
+  videoStatusText,
   recording,
   recordingSeconds,
   captureBusy,
@@ -31,6 +31,7 @@ export const BottomCameraToolbar = ({
 }: {
   mode: CaptureMode
   layoutLabel: string
+  videoStatusText?: string | null
   recording: boolean
   recordingSeconds: number
   captureBusy: boolean
@@ -45,103 +46,130 @@ export const BottomCameraToolbar = ({
   onPressShutter: () => void
   onToggleQuickPanel: () => void
 }) => (
-  <SafeAreaView style={styles.bottomSafe}>
-    <View style={styles.bottomArea}>
-      <View style={styles.modeTabs}>
-        <ModeButton
-          active={mode === 'photo'}
-          label="拍照"
-          onPress={onSetPhotoMode}
-        />
-        <ModeButton
-          active={mode === 'video'}
-          label="视频"
-          onPress={onSetVideoMode}
-        />
+  <SafeAreaView pointerEvents="box-none" style={styles.bottomSafe}>
+    <View pointerEvents="box-none" style={styles.bottomArea}>
+      <View pointerEvents="box-none" style={styles.controlRow}>
+        <View style={styles.controlGroup}>
+          {!recording && mode === 'video' && videoStatusText ? (
+            <Text style={styles.videoStatus}>{videoStatusText}</Text>
+          ) : null}
+          <View style={styles.controlRowInline}>
+            <View
+              style={[styles.controlGridSlot, styles.controlGridSlotDouble]}
+            />
+            <View style={styles.controlGridSlot}>
+              <TouchableOpacity
+                style={[
+                  styles.controlChip,
+                  reduceTransparency && styles.solidControl,
+                ]}
+                activeOpacity={0.8}
+                onPress={onToggleLayout}
+              >
+                <MaterialIcons
+                  name="picture-in-picture-alt"
+                  color="rgba(255,255,255,0.86)"
+                  size={17}
+                />
+                <Text style={styles.chipText}>{layoutLabel}</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={[styles.controlGridSlot, styles.timerGridSlot]}>
+              {recording ? (
+                <Text style={styles.timer}>
+                  {formatDuration(recordingSeconds)}
+                </Text>
+              ) : null}
+            </View>
+            <View style={styles.controlGridSlot} />
+          </View>
+        </View>
       </View>
-      <View style={styles.controlRow}>
-        <TouchableOpacity
-          style={[
-            styles.controlChip,
-            reduceTransparency && styles.solidControl,
-          ]}
-          activeOpacity={0.8}
-          onPress={onToggleLayout}
-        >
-          <MaterialIcons
-            name="picture-in-picture-alt"
-            color="rgba(255,255,255,0.86)"
-            size={17}
-          />
-          <Text style={styles.chipText}>{layoutLabel}</Text>
-        </TouchableOpacity>
-        {recording && (
-          <Text style={styles.timer}>{formatDuration(recordingSeconds)}</Text>
-        )}
-      </View>
-      <View style={styles.shutterRow}>
-        <TouchableOpacity
-          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
-          activeOpacity={0.8}
-          onPress={onOpenGallery}
-        >
-          <MaterialIcons
-            name="photo-library"
-            color="rgba(255,255,255,0.9)"
-            size={26}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
-          activeOpacity={0.8}
-          onPress={onFlipPrimaryCamera}
-        >
-          <MaterialIcons
-            name="flip-camera-ios"
-            color="rgba(255,255,255,0.9)"
-            size={27}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.shutterOuter,
-            { transform: [{ scale: shutterScale }] },
-          ]}
-          activeOpacity={0.85}
-          disabled={captureBusy || recordingBusy}
-          onPress={onPressShutter}
-        >
-          <View
+      <View pointerEvents="box-none" style={styles.shutterRow}>
+        <View style={styles.shutterGridSlot}>
+          <TouchableOpacity
             style={[
-              styles.shutterInner,
-              mode === 'video' && styles.shutterVideoIdle,
-              recording && styles.shutterRecording,
-              (captureBusy || recordingBusy) && styles.shutterBusy,
+              styles.sideButton,
+              reduceTransparency && styles.solidControl,
             ]}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
-          activeOpacity={0.8}
-          onPress={mode === 'video' ? onSetPhotoMode : onSetVideoMode}
-        >
-          <MaterialIcons
-            name={mode === 'video' ? 'photo-camera' : 'videocam'}
-            color="rgba(255,255,255,0.9)"
-            size={29}
-          />
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sideButton, reduceTransparency && styles.solidControl]}
-          activeOpacity={0.8}
-          onPress={onToggleQuickPanel}
-        >
-          <MaterialIcons
-            name="more-horiz"
-            color="rgba(255,255,255,0.9)"
-            size={27}
-          />
-        </TouchableOpacity>
+            activeOpacity={0.8}
+            onPress={onOpenGallery}
+          >
+            <MaterialIcons
+              name="photo-library"
+              color="rgba(255,255,255,0.9)"
+              size={26}
+            />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.shutterGridSlot}>
+          <TouchableOpacity
+            style={[
+              styles.sideButton,
+              reduceTransparency && styles.solidControl,
+            ]}
+            activeOpacity={0.8}
+            onPress={onFlipPrimaryCamera}
+          >
+            <MaterialIcons
+              name="flip-camera-ios"
+              color="rgba(255,255,255,0.9)"
+              size={27}
+            />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.shutterGridSlot}>
+          <TouchableOpacity
+            style={[
+              styles.shutterOuter,
+              { transform: [{ scale: shutterScale }] },
+            ]}
+            activeOpacity={0.85}
+            disabled={captureBusy || recordingBusy}
+            onPress={onPressShutter}
+          >
+            <View
+              style={[
+                styles.shutterInner,
+                mode === 'video' && styles.shutterVideoIdle,
+                recording && styles.shutterRecording,
+                (captureBusy || recordingBusy) && styles.shutterBusy,
+              ]}
+            />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.shutterGridSlot}>
+          <TouchableOpacity
+            style={[
+              styles.sideButton,
+              reduceTransparency && styles.solidControl,
+            ]}
+            activeOpacity={0.8}
+            onPress={mode === 'video' ? onSetPhotoMode : onSetVideoMode}
+          >
+            <MaterialIcons
+              name={mode === 'video' ? 'photo-camera' : 'videocam'}
+              color="rgba(255,255,255,0.9)"
+              size={29}
+            />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.shutterGridSlot}>
+          <TouchableOpacity
+            style={[
+              styles.sideButton,
+              reduceTransparency && styles.solidControl,
+            ]}
+            activeOpacity={0.8}
+            onPress={onToggleQuickPanel}
+          >
+            <MaterialIcons
+              name="more-horiz"
+              color="rgba(255,255,255,0.9)"
+              size={27}
+            />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   </SafeAreaView>
@@ -159,15 +187,8 @@ const formatDuration = (seconds: number) => {
 const styles = StyleSheet.create({
   bottomSafe: { position: 'absolute', left: 0, right: 0, bottom: 0 },
   bottomArea: {
-    paddingHorizontal: 18,
-    paddingTop: 18,
+    paddingTop: 8,
     paddingBottom: 12,
-  },
-  modeTabs: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
   },
   controlRow: {
     minHeight: 34,
@@ -176,6 +197,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 12,
     marginBottom: 10,
+  },
+  controlGroup: {
+    width: '100%',
+    alignItems: 'center',
+    gap: 6,
+  },
+  controlRowInline: {
+    width: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  controlGridSlot: {
+    flex: 1,
+    flexBasis: 0,
+    minWidth: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlGridSlotDouble: {
+    flex: 2,
+  },
+  timerGridSlot: {
+    width: '100%',
   },
   controlChip: {
     flexDirection: 'row',
@@ -193,11 +237,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '400',
   },
-  timer: { color: '#ff4757', fontSize: 13, fontWeight: '400' },
+  timer: {
+    width: '100%',
+    color: '#ff4757',
+    fontSize: 13,
+    fontWeight: '400',
+    textAlign: 'center',
+    fontVariant: ['tabular-nums'],
+  },
+  videoStatus: {
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 12,
+    fontWeight: '400',
+    marginLeft: 2,
+  },
   shutterRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    width: '100%',
+  },
+  shutterGridSlot: {
+    flex: 1,
+    flexBasis: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   sideButton: {
     width: 58,

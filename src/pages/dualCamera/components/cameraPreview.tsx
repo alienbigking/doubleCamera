@@ -1,4 +1,4 @@
-import React, { type ReactNode, useMemo } from 'react'
+import React, { type ReactNode, useMemo, useRef } from 'react'
 import {
   Pressable,
   StyleSheet,
@@ -45,7 +45,8 @@ export const CameraPane = ({
   onUnlockFocus,
   onViewportLayout,
   onPreviewRef,
-  onTapFocus,
+  onSingleTap,
+  onDoubleTap,
   tapFocusPoint,
 }: {
   label: string
@@ -60,10 +61,44 @@ export const CameraPane = ({
   onUnlockFocus?: () => void
   onViewportLayout?: (layout: LayoutRectangle) => void
   onPreviewRef?: (preview: PreviewView | null) => void
-  onTapFocus?: (event: GestureResponderEvent) => void
+  onSingleTap?: (event: GestureResponderEvent) => void
+  onDoubleTap?: () => void
   tapFocusPoint?: { x: number; y: number } | null
 }) => {
   const aspectRatio = getAspectRatio(ratio)
+  const tapTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastTapAtRef = useRef(0)
+  const lastTapEventRef = useRef<GestureResponderEvent | null>(null)
+
+  const handleTap = (event: GestureResponderEvent) => {
+    const now = Date.now()
+    const elapsed = now - lastTapAtRef.current
+
+    if (tapTimeoutRef.current) {
+      clearTimeout(tapTimeoutRef.current)
+      tapTimeoutRef.current = null
+    }
+
+    if (elapsed > 0 && elapsed < 260) {
+      lastTapAtRef.current = 0
+      lastTapEventRef.current = null
+      onDoubleTap?.()
+      return
+    }
+
+    lastTapAtRef.current = now
+    lastTapEventRef.current = event
+
+    if (onSingleTap) {
+      tapTimeoutRef.current = setTimeout(() => {
+        if (lastTapEventRef.current) {
+          onSingleTap(lastTapEventRef.current)
+        }
+        tapTimeoutRef.current = null
+        lastTapEventRef.current = null
+      }, 240)
+    }
+  }
 
   return (
     <View
@@ -98,10 +133,10 @@ export const CameraPane = ({
         )}
         {focusLocked && <FocusLockIndicator onUnlockFocus={onUnlockFocus} />}
         {tapFocusPoint && <TapFocusIndicator point={tapFocusPoint} />}
-        {onTapFocus && (
+        {(onSingleTap || onDoubleTap) && (
           <Pressable
             style={styles.tapFocusLayer}
-            onPress={onTapFocus}
+            onPress={handleTap}
             pointerEvents="box-only"
           />
         )}

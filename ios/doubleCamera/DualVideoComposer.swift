@@ -94,9 +94,7 @@ final class DualVideoComposer: NSObject {
     let rearGeometry = try await videoGeometry(for: rearSourceTrack, side: "rear")
     let frontGeometry = try await videoGeometry(for: frontSourceTrack, side: "front")
     let primarySize = primaryCamera == "front" ? frontGeometry.orientedSize : rearGeometry.orientedSize
-    let outputSize = outputRenderSize(
-      for: previewSize.width > 0 && previewSize.height > 0 ? previewSize : primarySize
-    )
+    let outputSize = evenSize(primarySize)
 
     let outputURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(
@@ -119,6 +117,13 @@ final class DualVideoComposer: NSObject {
       previewSize: previewSize,
       primaryCamera: primaryCamera,
       pipBorderVisible: pipBorderVisible
+    )
+
+    let primaryAsset = primaryCamera == "front" ? frontAsset : rearAsset
+    try await muxPrimaryAudioIfNeeded(
+      from: primaryAsset,
+      videoURL: outputURL,
+      duration: duration
     )
 
     return outputURL
@@ -395,6 +400,83 @@ final class DualVideoComposer: NSObject {
         userInfo: [NSLocalizedDescriptionKey: "Video writer failed: \(writer.error?.localizedDescription ?? "unknown")"]
       )
     }
+  }
+
+  private func muxPrimaryAudioIfNeeded(
+    from asset: AVAsset,
+    videoURL: URL,
+    duration: CMTime
+  ) async throws {
+    guard let audioTrack = try await asset.loadTracks(withMediaType: .audio).first else {
+      return
+    }
+
+    let renderedAsset = AVURLAsset(url: videoURL)
+    guard let renderedVideoTrack = try await renderedAsset.loadTracks(withMediaType: .video).first else {
+      return
+    }
+
+    let composition = AVMutableComposition()
+    guard
+      let compositionVideoTrack = composition.addMutableTrack(
+        withMediaType: .video,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      ),
+      let compositionAudioTrack = composition.addMutableTrack(
+        withMediaType: .audio,
+        preferredTrackID: kCMPersistentTrackID_Invalid
+      )
+    else {
+      return
+    }
+
+    let timeRange = CMTimeRange(start: .zero, duration: duration)
+    try compositionVideoTrack.insertTimeRange(timeRange, of: renderedVideoTrack, at: .zero)
+    compositionVideoTrack.preferredTransform = .identity
+    try compositionAudioTrack.insertTimeRange(timeRange, of: audioTrack, at: .zero)
+
+    guard let exportSession = AVAssetExportSession(
+      asset: composition,
+      presetName: AVAssetExportPresetPassthrough
+    ) else {
+      return
+    }
+
+    let audioOutputURL = FileManager.default.temporaryDirectory
+      .appendingPathComponent("dualcam-video-audio-\(Int(Date().timeIntervalSince1970 * 1000)).mp4")
+    try? FileManager.default.removeItem(at: audioOutputURL)
+
+    exportSession.outputURL = audioOutputURL
+    exportSession.outputFileType = .mp4
+    exportSession.shouldOptimizeForNetworkUse = true
+
+    try await withCheckedThrowingContinuation { continuation in
+      exportSession.exportAsynchronously {
+        switch exportSession.status {
+        case .completed:
+          continuation.resume()
+        case .failed, .cancelled:
+          continuation.resume(
+            throwing: exportSession.error ?? NSError(
+              domain: "DualVideoComposer",
+              code: -16,
+              userInfo: [NSLocalizedDescriptionKey: "Failed to export composed video with audio."]
+            )
+          )
+        default:
+          continuation.resume(
+            throwing: NSError(
+              domain: "DualVideoComposer",
+              code: -17,
+              userInfo: [NSLocalizedDescriptionKey: "Composed video export finished in an unexpected state."]
+            )
+          )
+        }
+      }
+    }
+
+    try? FileManager.default.removeItem(at: videoURL)
+    try FileManager.default.moveItem(at: audioOutputURL, to: videoURL)
   }
 
   private func composeLayers(

@@ -27,6 +27,8 @@ export {
   type WhiteBalanceOption,
 } from './whiteBalanceControlPanel'
 export type {
+  AudioChannelMode,
+  AudioQualityMode,
   CaptureMode,
   CaptureTimerMode,
   DualVideoComposeMode,
@@ -37,6 +39,7 @@ export type {
   PhotoSaveMode,
   SaveFeedback,
   StabilizationMode,
+  VideoFrameRateMode,
   VideoResolutionMode,
   VideoSaveMode,
   WhiteBalancePreset,

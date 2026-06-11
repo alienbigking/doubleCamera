@@ -35,6 +35,8 @@
 	<string>用于同时调用前后摄像头进行拍照和录制。</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>用于双摄视频录制时同步记录声音。</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>用于在拍摄内容中写入位置信息。</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>用于将双摄照片和视频保存到系统相册。</string>
 	<key>NSPhotoLibraryUsageDescription</key>

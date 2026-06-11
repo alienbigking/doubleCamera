@@ -24,6 +24,9 @@ export type SaveFeedback = 'saving' | 'saved' | 'fallback' | 'failed' | null
 export type FlashMode = 'off' | 'auto' | 'on'
 export type StabilizationMode = 'off' | 'standard' | 'cinematic'
 export type VideoResolutionMode = '720p' | '1080p' | '4k'
+export type VideoFrameRateMode = 24 | 30 | 60
+export type AudioChannelMode = 'off' | 'mono' | 'stereo'
+export type AudioQualityMode = 'standard' | 'high' | 'max'
 export type DualVideoComposeMode = 'pip' | 'split'
 
 export type LensOption = {

@@ -25,6 +25,7 @@ import {
   VisionCamera,
   type CameraDevice,
   type CameraController,
+  type Location,
   type CameraPhotoOutput,
   type CameraPreviewOutput,
   type CameraSession,
@@ -57,6 +58,8 @@ import {
   TopCameraToolbar,
   WhiteBalanceControlPanel,
   whiteBalanceOptions,
+  type AudioChannelMode,
+  type AudioQualityMode,
   type CaptureMode,
   type CaptureTimerMode,
   type DualVideoComposeMode,
@@ -66,6 +69,7 @@ import {
   type PhotoSaveMode,
   type SaveFeedback,
   type StabilizationMode,
+  type VideoFrameRateMode,
   type VideoResolutionMode,
   type VideoSaveMode,
   type WhiteBalancePreset,
@@ -75,6 +79,11 @@ import { CameraPane, CameraPreviewSurface } from './cameraPreview'
 import { NativeBlurView } from './nativeBlurView'
 import { composeDualPhoto } from './photoComposer'
 import { composeDualVideo } from './videoComposer'
+import {
+  prepareRecordingAudio,
+  requestCurrentCaptureLocation,
+  type CaptureLocation,
+} from './captureMetadata'
 import {
   applyFilterToPhoto,
   defaultProfessionalToneAdjustments,
@@ -88,6 +97,7 @@ import {
   RealtimeFilteredPreviewSurface,
   useRealtimeFilteredFrameOutputs,
 } from './realtimeFilteredPreview'
+import { resolveSceneHint, type SceneHint } from './sceneHints'
 import {
   getGalleryAssetIndex,
   markGalleryAssets,
@@ -115,6 +125,9 @@ type VideoOutputs = Partial<Record<CameraSide, CameraVideoOutput>>
 type FrameOutputs = Partial<
   Record<CameraSide, ReturnType<typeof VisionCamera.createFrameOutput>>
 >
+type ObjectOutputs = Partial<
+  Record<CameraSide, ReturnType<typeof VisionCamera.createObjectOutput>>
+>
 type Recorders = Partial<Record<CameraSide, Recorder>>
 type CameraPair = Record<CameraSide, CameraDevice>
 type Point = { x: number; y: number }
@@ -122,7 +135,13 @@ type CapturedPhotoFiles = Record<CameraSide, string> & { capturedAt: string }
 type RecordedVideo = { side: CameraSide; filePath: string }
 type RecordedVideoFile = RecordedVideo & { uri: string; size: number }
 type SavedCameraRollAsset = Awaited<ReturnType<typeof CameraRoll.saveAsset>>
-
+type SceneSignals = Record<
+  CameraSide,
+  {
+    faceSeenAt: number
+    nightSeenAt: number
+  }
+>
 const defaultLensOptions: LensOption[] = [
   {
     id: 'wide',
@@ -139,33 +158,108 @@ const pipViewportPadding = 12
 const albumName = 'DualCam'
 const stabilizationPriority: StabilizationMode[] = ['standard', 'cinematic']
 const captureTimerModes: CaptureTimerMode[] = ['off', '3s', '10s']
+const videoFrameRateOptionsByResolution: Record<
+  VideoResolutionMode,
+  VideoFrameRateMode[]
+> = {
+  '720p': [24, 30, 60],
+  '1080p': [24, 30, 60],
+  '4k': [24, 30],
+}
+const audioSampleRateByQuality: Record<AudioQualityMode, number> = {
+  standard: 22_050,
+  high: 44_100,
+  max: 48_000,
+}
 const videoResolutionConfig: Record<
   VideoResolutionMode,
-  { label: string; resolution: Size; fps: number }
+  { label: string; resolution: Size }
 > = {
   '720p': {
-    label: '720p 30fps',
+    label: '720p',
     resolution: CommonResolutions.HD_16_9,
-    fps: 30,
   },
   '1080p': {
-    label: '1080p 30fps',
+    label: '1080p',
     resolution: CommonResolutions.FHD_16_9,
-    fps: 30,
   },
   '4k': {
-    label: '4K 30fps',
+    label: '4K',
     resolution: CommonResolutions.UHD_16_9,
-    fps: 30,
   },
 }
 const defaultProfessionalISO = 120
 const defaultProfessionalFocusPosition = 0.5
+const sceneSignalStaleMs = 1800
 const defaultExposureRange: ExposureRange = {
   min: -1,
   max: 1,
   supported: false,
 }
+const createEmptySceneSignals = (): SceneSignals => ({
+  rear: {
+    faceSeenAt: 0,
+    nightSeenAt: 0,
+  },
+  front: {
+    faceSeenAt: 0,
+    nightSeenAt: 0,
+  },
+})
+
+const getPreferredVideoFrameRate = (
+  options: VideoFrameRateMode[],
+  preferred?: VideoFrameRateMode,
+) => {
+  if (preferred != null && options.includes(preferred)) return preferred
+  if (options.includes(30)) return 30
+  return options[0] || 30
+}
+
+const getAudioChannelLabel = (mode: AudioChannelMode) => {
+  if (mode === 'off') return '静音'
+  if (mode === 'mono') return '单声道'
+  return '立体声'
+}
+
+const getAudioQualityLabel = (mode: AudioQualityMode) => {
+  if (mode === 'high') return '高清'
+  if (mode === 'max') return '原声'
+  return '标准'
+}
+
+const getPhotoRenderQualityLabel = (quality: DualCameraFilterRenderQuality) => {
+  if (quality === 'standard') return '标准'
+  return '4K'
+}
+
+const getVideoStatusLabel = (
+  resolution: VideoResolutionMode,
+  frameRate: VideoFrameRateMode,
+  audioChannelMode: AudioChannelMode,
+) =>
+  `${
+    videoResolutionConfig[resolution].label
+  } · ${frameRate}fps · ${getAudioChannelLabel(audioChannelMode)}`
+
+const getVideoTargetBitRate = (
+  resolution: VideoResolutionMode,
+  frameRate: VideoFrameRateMode,
+  quality: AudioQualityMode,
+) => {
+  const baseBitRate =
+    resolution === '4k'
+      ? 28_000_000
+      : resolution === '1080p'
+      ? 12_000_000
+      : 7_000_000
+  const frameMultiplier = frameRate >= 60 ? 1.45 : frameRate === 24 ? 0.9 : 1
+  const qualityMultiplier =
+    quality === 'max' ? 1.22 : quality === 'high' ? 1.08 : 1
+
+  return Math.round(baseBitRate * frameMultiplier * qualityMultiplier)
+}
+
 const createEmptyCaptureAnalyticsStats = (): CaptureAnalyticsStats => {
   const now = new Date().toISOString()
 
@@ -401,11 +495,17 @@ const DualCamera = () => {
   const [lensSwitchHintEnabled, setLensSwitchHintEnabled] = useState(true)
   const [videoResolution, setVideoResolution] =
     useState<VideoResolutionMode>('1080p')
+  const [videoFrameRate, setVideoFrameRate] = useState<VideoFrameRateMode>(30)
+  const [audioChannelMode, setAudioChannelMode] =
+    useState<AudioChannelMode>('stereo')
+  const [audioQualityMode, setAudioQualityMode] =
+    useState<AudioQualityMode>('high')
   const [dualVideoComposeMode, setDualVideoComposeMode] =
     useState<DualVideoComposeMode>('pip')
   const [videoSaveMode, setVideoSaveMode] = useState<VideoSaveMode>('combined')
   const [proVideoEnabled, setProVideoEnabled] = useState(false)
   const [volumeShutterEnabled, setVolumeShutterEnabled] = useState(true)
+  const [saveLocationEnabled, setSaveLocationEnabled] = useState(false)
   const [pipBorderVisible, setPipBorderVisible] = useState(true)
   const [reduceTransparencyEnabled, setReduceTransparencyEnabled] =
     useState(false)
@@ -460,6 +560,7 @@ const DualCamera = () => {
   const [controlStatusMessage, setControlStatusMessage] = useState<
     string | null
   >(null)
+  const [sceneHint, setSceneHint] = useState<SceneHint | null>(null)
   const [tapFocusPoint, setTapFocusPoint] = useState<Point | null>(null)
   const [modeTransitionVisible, setModeTransitionVisible] = useState(false)
   const [pipPosition, setPipPosition] = useState<Point>(() => {
@@ -478,6 +579,7 @@ const DualCamera = () => {
   const previewOutputsRef = useRef<PreviewOutputs>({})
   const videoOutputsRef = useRef<VideoOutputs>({})
   const frameOutputsRef = useRef<FrameOutputs>({})
+  const sceneSignalsRef = useRef<SceneSignals>(createEmptySceneSignals())
   const recordersRef = useRef<Recorders>({})
   const recordingFinishedRef = useRef<Promise<RecordedVideo>[]>([])
   const captureBusyRef = useRef(false)
@@ -493,15 +595,19 @@ const DualCamera = () => {
     null,
   )
   const tapFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pipLastTapAtRef = useRef(0)
   const pipPositionRef = useRef(pipPosition)
   const pipDragStartRef = useRef(pipPosition)
   const primaryViewportLayoutRef = useRef<LayoutRectangle | null>(null)
+  const videoWarmupPendingRef = useRef(false)
   const secondaryCamera: CameraSide =
     primaryCamera === 'rear' ? 'front' : 'rear'
   const isPip = layout === 'pip'
+  const shouldUseDualPhotoSession = mode === 'photo'
   const toneAdjustmentsEnabled = hasProfessionalToneAdjustments(toneAdjustments)
   const realtimeFilterEnabled =
     mode === 'photo' && (selectedFilterId !== 'none' || toneAdjustmentsEnabled)
+  const enableSceneObjectStreaming = aiSceneEnabled && shouldUseDualPhotoSession
   const {
     frameOutputs: realtimeFilterFrameOutputs,
     textures: realtimeTextures,
@@ -510,6 +616,18 @@ const DualCamera = () => {
     filterId: selectedFilterId,
     toneAdjustments,
   })
+  const sceneObjectOutputs = useMemo<ObjectOutputs>(() => {
+    if (Platform.OS !== 'ios') return {}
+
+    return {
+      rear: VisionCamera.createObjectOutput({
+        enabledObjectTypes: ['face'],
+      }),
+      front: VisionCamera.createObjectOutput({
+        enabledObjectTypes: ['face'],
+      }),
+    }
+  }, [])
 
   const loadCaptureAnalyticsStats = useCallback(async () => {
     try {
@@ -559,8 +677,100 @@ const DualCamera = () => {
   }, [pipPosition])
 
   useEffect(() => {
+    const rearOutput = sceneObjectOutputs.rear
+    const frontOutput = sceneObjectOutputs.front
+
+    if (!rearOutput || !frontOutput) return
+
+    if (!aiSceneEnabled) {
+      sceneSignalsRef.current = createEmptySceneSignals()
+      setSceneHint(null)
+      rearOutput.setOnObjectsScannedCallback(undefined)
+      frontOutput.setOnObjectsScannedCallback(undefined)
+      return
+    }
+
+    const bindCallback = (side: CameraSide) => (objects: unknown[]) => {
+      const now = Date.now()
+      const signal = sceneSignalsRef.current[side]
+      let faceSeen = false
+
+      for (const object of objects) {
+        if (
+          !faceSeen &&
+          typeof object === 'object' &&
+          object !== null &&
+          'faceID' in object
+        ) {
+          faceSeen = true
+        }
+      }
+
+      if (faceSeen) {
+        signal.faceSeenAt = now
+      }
+    }
+
+    rearOutput.setOnObjectsScannedCallback(bindCallback('rear'))
+    frontOutput.setOnObjectsScannedCallback(bindCallback('front'))
+
+    return () => {
+      rearOutput.setOnObjectsScannedCallback(undefined)
+      frontOutput.setOnObjectsScannedCallback(undefined)
+    }
+  }, [aiSceneEnabled, sceneObjectOutputs])
+
+  useEffect(() => {
     loadCaptureAnalyticsStats()
   }, [loadCaptureAnalyticsStats])
+
+  useEffect(() => {
+    if (!aiSceneEnabled || previewStatus !== 'ready') {
+      sceneSignalsRef.current = createEmptySceneSignals()
+      setSceneHint(null)
+      return
+    }
+
+    const interval = setInterval(() => {
+      const controller =
+        primaryCamera === 'rear'
+          ? rearCameraControllerRef.current
+          : frontCameraControllerRef.current
+      if (!controller) return
+
+      const exposureDuration = controller.exposureDuration || 0
+      const iso = controller.iso || 0
+      if (iso >= 650 || exposureDuration >= 1 / 28) {
+        sceneSignalsRef.current[primaryCamera].nightSeenAt = Date.now()
+      }
+    }, 1200)
+
+    return () => clearInterval(interval)
+  }, [aiSceneEnabled, previewStatus, primaryCamera])
+
+  useEffect(() => {
+    if (!aiSceneEnabled || previewStatus !== 'ready') {
+      setSceneHint(null)
+      return
+    }
+
+    const syncSceneHint = () => {
+      const now = Date.now()
+      const signal = sceneSignalsRef.current[primaryCamera]
+      const nextSceneHint = resolveSceneHint({
+        hasFace: now - signal.faceSeenAt <= sceneSignalStaleMs,
+        isNight: now - signal.nightSeenAt <= sceneSignalStaleMs,
+      })
+
+      setSceneHint(current =>
+        current?.id === nextSceneHint?.id ? current : nextSceneHint,
+      )
+    }
+
+    syncSceneHint()
+    const interval = setInterval(syncSceneHint, 500)
+    return () => clearInterval(interval)
+  }, [aiSceneEnabled, previewStatus, primaryCamera])
 
   useEffect(
     () => () => {
@@ -718,6 +928,16 @@ const DualCamera = () => {
         })
         pipPositionRef.current = nextPosition
         setPipPosition(nextPosition)
+
+        if (Math.abs(gestureState.dx) <= 6 && Math.abs(gestureState.dy) <= 6) {
+          const now = Date.now()
+          if (now - pipLastTapAtRef.current < 260) {
+            pipLastTapAtRef.current = 0
+            setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
+          } else {
+            pipLastTapAtRef.current = now
+          }
+        }
       },
       onPanResponderTerminate: (_, gestureState) => {
         const current = pipDragStartRef.current
@@ -766,19 +986,29 @@ const DualCamera = () => {
 
         const rearPreviewOutput = VisionCamera.createPreviewOutput()
         const frontPreviewOutput = VisionCamera.createPreviewOutput()
-        const rearFrameOutput = realtimeFilterFrameOutputs.rear
-        const frontFrameOutput = realtimeFilterFrameOutputs.front
+        const rearFrameOutput = realtimeFilterEnabled
+          ? realtimeFilterFrameOutputs.rear
+          : undefined
+        const frontFrameOutput = realtimeFilterEnabled
+          ? realtimeFilterFrameOutputs.front
+          : undefined
+        const rearObjectOutput = enableSceneObjectStreaming
+          ? sceneObjectOutputs.rear
+          : undefined
+        const frontObjectOutput = enableSceneObjectStreaming
+          ? sceneObjectOutputs.front
+          : undefined
         const rearPhotoOutput = VisionCamera.createPhotoOutput({
-          targetResolution: CommonResolutions.FHD_4_3,
+          targetResolution: CommonResolutions.UHD_4_3,
           containerFormat: 'jpeg',
-          quality: 0.92,
-          qualityPrioritization: 'balanced',
+          quality: 0.96,
+          qualityPrioritization: 'quality',
         })
         const frontPhotoOutput = VisionCamera.createPhotoOutput({
-          targetResolution: CommonResolutions.FHD_4_3,
+          targetResolution: CommonResolutions.UHD_4_3,
           containerFormat: 'jpeg',
-          quality: 0.92,
-          qualityPrioritization: 'balanced',
+          quality: 0.96,
+          qualityPrioritization: 'quality',
         })
         const session = await VisionCamera.createCameraSession(true)
         const rearLensOptions = getRearLensOptions(cameraPair.rear)
@@ -805,7 +1035,12 @@ const DualCamera = () => {
             input: cameraPair.rear,
             outputs: [
               { output: rearPreviewOutput, mirrorMode: 'off' },
-              { output: rearFrameOutput, mirrorMode: 'off' },
+              ...(rearFrameOutput
+                ? [{ output: rearFrameOutput, mirrorMode: 'off' as const }]
+                : []),
+              ...(rearObjectOutput
+                ? [{ output: rearObjectOutput, mirrorMode: 'off' as const }]
+                : []),
               { output: rearPhotoOutput, mirrorMode: 'off' },
             ],
             constraints: rearPhotoConstraints,
@@ -815,7 +1050,12 @@ const DualCamera = () => {
             input: cameraPair.front,
             outputs: [
               { output: frontPreviewOutput, mirrorMode: 'on' },
-              { output: frontFrameOutput, mirrorMode: 'on' },
+              ...(frontFrameOutput
+                ? [{ output: frontFrameOutput, mirrorMode: 'on' as const }]
+                : []),
+              ...(frontObjectOutput
+                ? [{ output: frontObjectOutput, mirrorMode: 'on' as const }]
+                : []),
               { output: frontPhotoOutput, mirrorMode: 'on' },
             ],
             constraints: frontPhotoConstraints,
@@ -872,7 +1112,7 @@ const DualCamera = () => {
       }
     }
 
-    startMultiCamPreview()
+    void startMultiCamPreview()
 
     return () => {
       cancelled = true
@@ -905,7 +1145,7 @@ const DualCamera = () => {
         tapFocusTimerRef.current = null
       }
     }
-  }, [photoHDREnabled, realtimeFilterFrameOutputs])
+  }, [photoHDREnabled, realtimeFilterFrameOutputs, sceneObjectOutputs])
 
   useEffect(() => {
     if (!recording) return
@@ -914,9 +1154,45 @@ const DualCamera = () => {
     }, 1000)
     return () => clearInterval(timer)
   }, [recording])
+
   const layoutLabel = layout === 'pip' ? '画中画' : '上下分屏'
   const effectiveDualVideoComposeMode: DualVideoComposeMode =
     layout === 'split' ? 'split' : 'pip'
+  const availableVideoFrameRates = (() => {
+    const preferredOptions = videoFrameRateOptionsByResolution[videoResolution]
+    const pair = cameraPairRef.current
+
+    if (!pair) return preferredOptions
+
+    const filtered = preferredOptions.filter(
+      fps => pair.rear.supportsFPS(fps) && pair.front.supportsFPS(fps),
+    )
+
+    return filtered.length > 0 ? filtered : preferredOptions
+  })()
+
+  useEffect(() => {
+    if ((filterRenderQuality as string) !== 'original') return
+
+    setFilterRenderQuality('4k')
+  }, [filterRenderQuality])
+
+  useEffect(() => {
+    if (videoResolution !== '4k') return
+
+    setVideoResolution('1080p')
+    setVideoCaptureReady(false)
+  }, [videoResolution])
+
+  useEffect(() => {
+    if (availableVideoFrameRates.includes(videoFrameRate)) return
+
+    const fallbackFrameRate = getPreferredVideoFrameRate(
+      availableVideoFrameRates,
+    )
+    setVideoFrameRate(fallbackFrameRate)
+  }, [availableVideoFrameRates, videoFrameRate])
+
   const primaryLabel = primaryCamera === 'rear' ? '后置主画面' : '前置主画面'
   const secondaryLabel = secondaryCamera === 'rear' ? '后置预览' : '前置预览'
   const previewStatusText = getCameraStatusText(previewStatus, previewError)
@@ -1430,10 +1706,57 @@ const DualCamera = () => {
   }
 
   const selectVideoResolution = (value: VideoResolutionMode) => {
-    setVideoResolution(value)
+    const resolvedResolution = value === '4k' ? '1080p' : value
+    const nextFrameRates = videoFrameRateOptionsByResolution[
+      resolvedResolution
+    ].filter(fps => {
+      const pair = cameraPairRef.current
+      if (!pair) return true
+      return pair.rear.supportsFPS(fps) && pair.front.supportsFPS(fps)
+    })
+    const resolvedFrameRates =
+      nextFrameRates.length > 0
+        ? nextFrameRates
+        : videoFrameRateOptionsByResolution[resolvedResolution]
+    const nextFrameRate = getPreferredVideoFrameRate(
+      resolvedFrameRates,
+      videoFrameRate,
+    )
+
+    setVideoResolution(resolvedResolution)
+    setVideoFrameRate(nextFrameRate)
     setVideoCaptureReady(false)
     showControlStatusMessage(
-      `${videoResolutionConfig[value].label} 下次录像生效`,
+      `${videoResolutionConfig[resolvedResolution].label} ${nextFrameRate}fps 下次录像生效`,
+    )
+  }
+
+  const selectVideoFrameRate = (value: VideoFrameRateMode) => {
+    if (!availableVideoFrameRates.includes(value)) return
+
+    setVideoFrameRate(value)
+    setVideoCaptureReady(false)
+    showControlStatusMessage(
+      `${videoResolutionConfig[videoResolution].label} ${value}fps 下次录像生效`,
+    )
+  }
+
+  const selectAudioChannelMode = (value: AudioChannelMode) => {
+    setAudioChannelMode(value)
+    setVideoCaptureReady(false)
+    showControlStatusMessage(`视频收音：${getAudioChannelLabel(value)}`)
+  }
+
+  const selectAudioQualityMode = (value: AudioQualityMode) => {
+    setAudioQualityMode(value)
+    setVideoCaptureReady(false)
+    showControlStatusMessage(`录音质量：${getAudioQualityLabel(value)}`)
+  }
+
+  const toggleSaveLocationSetting = (enabled: boolean) => {
+    setSaveLocationEnabled(enabled)
+    showControlStatusMessage(
+      enabled ? '位置信息保存已开启' : '位置信息保存已关闭',
     )
   }
 
@@ -1444,13 +1767,7 @@ const DualCamera = () => {
 
   const selectPhotoRenderQuality = (quality: DualCameraFilterRenderQuality) => {
     setFilterRenderQuality(quality)
-    showControlStatusMessage(
-      quality === 'standard'
-        ? '照片质量：标准'
-        : quality === 'original'
-        ? '照片质量：原图'
-        : '照片质量：高清',
-    )
+    showControlStatusMessage(`照片质量：${getPhotoRenderQualityLabel(quality)}`)
   }
 
   const updateToneAdjustment = (
@@ -1621,6 +1938,10 @@ const DualCamera = () => {
     [mode, previewStatus, primaryCamera, proMode, showTapFocusIndicator],
   )
 
+  const handlePrimaryPreviewDoubleTap = useCallback(() => {
+    setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
+  }, [])
+
   const getExposureRange = (
     controller: CameraController | null,
   ): ExposureRange => {
@@ -1782,6 +2103,21 @@ const DualCamera = () => {
     }
   }
 
+  const resolveCaptureLocation = async (): Promise<
+    CaptureLocation | undefined
+  > => {
+    if (!saveLocationEnabled) return undefined
+
+    try {
+      const location = await requestCurrentCaptureLocation()
+      return location || undefined
+    } catch (error) {
+      console.warn('Request capture location failed', error)
+      showControlStatusMessage('定位获取失败，本次不写入位置')
+      return undefined
+    }
+  }
+
   const prependGalleryAssets = (
     assets: { asset: SavedCameraRollAsset; kind: GalleryAssetKind }[],
   ) => {
@@ -1932,13 +2268,16 @@ const DualCamera = () => {
     const captureStartedAt = Date.now()
 
     try {
+      const captureLocation = await resolveCaptureLocation()
       runCaptureAnimation()
       showSaveFeedback('saving')
       setCaptureBusy(true)
+      const photoLocation = captureLocation as Location | undefined
       const rearPhoto = await rearPhotoOutput.capturePhotoToFile(
         {
           flashMode: rearHasFlash ? flashMode : 'off',
           enableShutterSound: true,
+          location: photoLocation,
         },
         {},
       )
@@ -1946,6 +2285,7 @@ const DualCamera = () => {
         {
           flashMode: 'off',
           enableShutterSound: false,
+          location: photoLocation,
         },
         {},
       )
@@ -1991,6 +2331,11 @@ const DualCamera = () => {
   }
 
   const configureVideoSession = async () => {
+    if (mode !== 'video') {
+      videoWarmupPendingRef.current = false
+      return false
+    }
+
     if (videoCaptureReady) return true
     if (videoConfigurePromiseRef.current) {
       return videoConfigurePromiseRef.current
@@ -2001,80 +2346,95 @@ const DualCamera = () => {
       const cameraPair = cameraPairRef.current
       const rearPreviewOutput = previewOutputsRef.current.rear
       const frontPreviewOutput = previewOutputsRef.current.front
-      const rearPhotoOutput = photoOutputsRef.current.rear
-      const frontPhotoOutput = photoOutputsRef.current.front
 
       if (
         !session ||
         !cameraPair ||
         !rearPreviewOutput ||
-        !frontPreviewOutput ||
-        !rearPhotoOutput ||
-        !frontPhotoOutput
+        !frontPreviewOutput
       ) {
         return false
       }
 
       const selectedVideoConfig = videoResolutionConfig[videoResolution]
+      const enableHigherResolutionCodecs =
+        videoResolution === '4k' || videoFrameRate >= 60
+      const enableVideoAudio = audioChannelMode !== 'off'
+      const targetBitRate = getVideoTargetBitRate(
+        videoResolution,
+        videoFrameRate,
+        audioQualityMode,
+      )
       const rearVideoOutput = VisionCamera.createVideoOutput({
         targetResolution: selectedVideoConfig.resolution,
-        enableAudio: false,
-        enableHigherResolutionCodecs: videoResolution === '4k',
+        enableAudio: enableVideoAudio,
+        enableHigherResolutionCodecs,
+        targetBitRate,
         fileType: 'mp4',
       })
       const frontVideoOutput = VisionCamera.createVideoOutput({
         targetResolution: selectedVideoConfig.resolution,
-        enableAudio: false,
-        enableHigherResolutionCodecs: videoResolution === '4k',
+        enableAudio: enableVideoAudio,
+        enableHigherResolutionCodecs,
+        targetBitRate,
         fileType: 'mp4',
       })
       const selectedLens =
         lensOptions.find(option => option.id === selectedLensId) ||
         defaultLensOptions[0]
       const rearConstraints = [
-        { fps: selectedVideoConfig.fps },
+        { fps: videoFrameRate },
         { resolutionBias: rearVideoOutput },
         ...(stabilizationMode !== 'off' &&
         cameraPair.rear.supportsVideoStabilizationMode(stabilizationMode)
           ? [{ videoStabilizationMode: stabilizationMode }]
           : []),
       ]
-      const frontConstraints = [
-        { fps: selectedVideoConfig.fps },
-        { resolutionBias: frontVideoOutput },
-        ...(stabilizationMode !== 'off' &&
-        cameraPair.front.supportsVideoStabilizationMode(stabilizationMode)
-          ? [{ videoStabilizationMode: stabilizationMode }]
-          : []),
-      ]
+      const frontConstraints = frontVideoOutput
+        ? [
+            { fps: videoFrameRate },
+            { resolutionBias: frontVideoOutput },
+            ...(stabilizationMode !== 'off' &&
+            cameraPair.front.supportsVideoStabilizationMode(stabilizationMode)
+              ? [{ videoStabilizationMode: stabilizationMode }]
+              : []),
+          ]
+        : []
 
-      const controllers = await session.configure([
-        {
-          input: cameraPair.rear,
-          outputs: [
-            { output: rearPreviewOutput, mirrorMode: 'off' },
-            { output: rearPhotoOutput, mirrorMode: 'off' },
-            { output: rearVideoOutput, mirrorMode: 'off' },
-          ],
-          constraints: rearConstraints,
-          initialZoom: selectedLens.zoomValue,
-        },
+      const rearConnection = {
+        input: cameraPair.rear,
+        outputs: [
+          { output: rearPreviewOutput, mirrorMode: 'off' as const },
+          { output: rearVideoOutput, mirrorMode: 'off' as const },
+        ],
+        constraints: rearConstraints,
+        initialZoom: selectedLens.zoomValue,
+      }
+      const connections = [
+        rearConnection,
         {
           input: cameraPair.front,
           outputs: [
-            { output: frontPreviewOutput, mirrorMode: 'on' },
-            { output: frontPhotoOutput, mirrorMode: 'on' },
-            { output: frontVideoOutput, mirrorMode: 'on' },
+            { output: frontPreviewOutput, mirrorMode: 'on' as const },
+            { output: frontVideoOutput, mirrorMode: 'on' as const },
           ],
           constraints: frontConstraints,
         },
-      ])
+      ]
+
+      const controllers = await session.configure(connections)
       await session.start()
 
       videoOutputsRef.current = {
         rear: rearVideoOutput,
-        front: frontVideoOutput,
+        ...(frontVideoOutput ? { front: frontVideoOutput } : {}),
       }
+      console.info('Configured video session outputs', {
+        requestedResolution: selectedVideoConfig.label,
+        requestedFrameRate: videoFrameRate,
+        rearCurrentResolution: rearVideoOutput.currentResolution,
+        frontCurrentResolution: frontVideoOutput.currentResolution,
+      })
       rearCameraControllerRef.current = controllers[0] || null
       frontCameraControllerRef.current = controllers[1] || null
       await applyAiEnhancementSettings(controllers[0] || null)
@@ -2143,11 +2503,113 @@ const DualCamera = () => {
     }
   }
 
+  const configurePhotoSession = async () => {
+    const session = cameraSessionRef.current
+    const cameraPair = cameraPairRef.current
+    const rearPreviewOutput = previewOutputsRef.current.rear
+    const frontPreviewOutput = previewOutputsRef.current.front
+    const rearPhotoOutput = photoOutputsRef.current.rear
+    const frontPhotoOutput = photoOutputsRef.current.front
+    const rearFrameOutput = frameOutputsRef.current.rear
+    const frontFrameOutput = frameOutputsRef.current.front
+
+    if (
+      !session ||
+      !cameraPair ||
+      !rearPreviewOutput ||
+      !frontPreviewOutput ||
+      !rearPhotoOutput ||
+      !frontPhotoOutput
+    ) {
+      return false
+    }
+
+    const selectedLens =
+      lensOptions.find(option => option.id === selectedLensId) ||
+      defaultLensOptions[0]
+    const rearObjectOutput = sceneObjectOutputs.rear
+    const frontObjectOutput = sceneObjectOutputs.front
+    const rearPhotoHDRSupported = cameraPair.rear.supportsPhotoHDR
+    const frontPhotoHDRSupported = cameraPair.front.supportsPhotoHDR
+    const photoHDRActive =
+      photoHDREnabled && rearPhotoHDRSupported && frontPhotoHDRSupported
+    const rearPhotoConstraints = photoHDRActive
+      ? [{ photoHDR: true }, { resolutionBias: rearPhotoOutput }]
+      : [{ resolutionBias: rearPhotoOutput }]
+    const frontPhotoConstraints = photoHDRActive
+      ? [{ photoHDR: true }, { resolutionBias: frontPhotoOutput }]
+      : [{ resolutionBias: frontPhotoOutput }]
+
+    const controllers = await session.configure([
+      {
+        input: cameraPair.rear,
+        outputs: [
+          { output: rearPreviewOutput, mirrorMode: 'off' },
+          ...(rearFrameOutput
+            ? [{ output: rearFrameOutput, mirrorMode: 'off' as const }]
+            : []),
+          ...(rearObjectOutput
+            ? [{ output: rearObjectOutput, mirrorMode: 'off' as const }]
+            : []),
+          { output: rearPhotoOutput, mirrorMode: 'off' },
+        ],
+        constraints: rearPhotoConstraints,
+        initialZoom: selectedLens.zoomValue,
+      },
+      {
+        input: cameraPair.front,
+        outputs: [
+          { output: frontPreviewOutput, mirrorMode: 'on' },
+          ...(frontFrameOutput
+            ? [{ output: frontFrameOutput, mirrorMode: 'on' as const }]
+            : []),
+          ...(frontObjectOutput
+            ? [{ output: frontObjectOutput, mirrorMode: 'on' as const }]
+            : []),
+          { output: frontPhotoOutput, mirrorMode: 'on' },
+        ],
+        constraints: frontPhotoConstraints,
+      },
+    ])
+    await session.start()
+
+    videoOutputsRef.current = {}
+    rearCameraControllerRef.current = controllers[0] || null
+    frontCameraControllerRef.current = controllers[1] || null
+    setVideoCaptureReady(false)
+    await applyAiEnhancementSettings(controllers[0] || null)
+    syncProfessionalDefaultsFromController(controllers[0] || null)
+    setRearTorchMode(flashMode, controllers[0] || null)
+    return true
+  }
+
   const startVideoRecording = async () => {
     if (recording || recordingBusy) return
 
     try {
       setRecordingBusy(true)
+      const enableVideoAudio = audioChannelMode !== 'off'
+      if (enableVideoAudio) {
+        const hasMicrophonePermission =
+          VisionCamera.microphonePermissionStatus === 'authorized' ||
+          (await VisionCamera.requestMicrophonePermission())
+
+        if (!hasMicrophonePermission) {
+          showControlStatusMessage('请先允许麦克风权限')
+          return
+        }
+
+        try {
+          await prepareRecordingAudio(
+            audioChannelMode === 'mono' ? 1 : 2,
+            audioSampleRateByQuality[audioQualityMode],
+          )
+        } catch (error) {
+          console.warn('Prepare recording audio failed', error)
+        }
+      }
+
+      const captureLocation = await resolveCaptureLocation()
       const configured = await configureVideoSession()
       if (!configured) {
         console.warn('Dual video recording is not available on this device')
@@ -2161,8 +2623,15 @@ const DualCamera = () => {
         return
       }
 
-      const rearRecorder = await rearVideoOutput.createRecorder({})
-      const frontRecorder = await frontVideoOutput.createRecorder({})
+      const recorderSettings = captureLocation
+        ? { location: captureLocation as Location }
+        : {}
+      const rearRecorder = await rearVideoOutput.createRecorder(
+        recorderSettings,
+      )
+      const frontRecorder = frontVideoOutput
+        ? await frontVideoOutput.createRecorder(recorderSettings)
+        : null
 
       const makeRecording = (side: CameraSide, recorder: Recorder) => {
         let startRecording: Promise<void>
@@ -2176,20 +2645,23 @@ const DualCamera = () => {
       }
 
       const rearRecording = makeRecording('rear', rearRecorder)
-      const frontRecording = makeRecording('front', frontRecorder)
-
       recordersRef.current = {
         rear: rearRecorder,
-        front: frontRecorder,
+        ...(frontRecorder ? { front: frontRecorder } : {}),
       }
+      const frontRecording = frontRecorder
+        ? makeRecording('front', frontRecorder)
+        : null
       recordingFinishedRef.current = [
         rearRecording.finishPromise,
-        frontRecording.finishPromise,
+        ...(frontRecording ? [frontRecording.finishPromise] : []),
       ]
-      await Promise.all([
-        rearRecording.startRecording,
-        frontRecording.startRecording,
-      ])
+      await Promise.all(
+        [
+          rearRecording.startRecording,
+          ...(frontRecording ? [frontRecording.startRecording] : []),
+        ].filter(Boolean),
+      )
       setRecordingSeconds(0)
       setRecording(true)
     } catch (error) {
@@ -2201,15 +2673,58 @@ const DualCamera = () => {
     }
   }
 
-  const enterVideoMode = () => {
-    flashModeTransition(async () => {
-      setMode('video')
-      if (previewStatus !== 'ready' || recording || videoCaptureReady) return
+  useEffect(() => {
+    if (mode !== 'video') {
+      videoWarmupPendingRef.current = false
+      return
+    }
 
-      const configured = await configureVideoSession()
-      if (configured) {
-        showControlStatusMessage('录像已就绪')
+    if (previewStatus !== 'ready' || recording || videoCaptureReady) {
+      return
+    }
+
+    let cancelled = false
+
+    const warmupVideoCapture = async () => {
+      try {
+        const configured = await configureVideoSession()
+        if (configured && !cancelled && videoWarmupPendingRef.current) {
+          videoWarmupPendingRef.current = false
+          showControlStatusMessage('录像已就绪')
+        }
+      } catch (error) {
+        if (videoWarmupPendingRef.current) {
+          videoWarmupPendingRef.current = false
+        }
+        console.warn('Warm up dual video session failed', error)
       }
+    }
+
+    void warmupVideoCapture()
+
+    return () => {
+      cancelled = true
+    }
+  }, [
+    mode,
+    previewStatus,
+    recording,
+    videoCaptureReady,
+    videoResolution,
+    videoFrameRate,
+    audioChannelMode,
+    audioQualityMode,
+    stabilizationMode,
+    selectedLensId,
+    proMode,
+    proVideoEnabled,
+  ])
+
+  const enterVideoMode = () => {
+    flashModeTransition(() => {
+      setMode('video')
+      videoWarmupPendingRef.current = true
+      showControlStatusMessage('正在准备录像')
     })
   }
 
@@ -2224,6 +2739,10 @@ const DualCamera = () => {
   const selectDualVideoComposeMode = (value: DualVideoComposeMode) => {
     setLayout(value)
     setDualVideoComposeMode(value)
+  }
+
+  const flipPrimaryCamera = () => {
+    setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
   }
 
   const stopVideoRecording = async () => {
@@ -2479,7 +2998,8 @@ const DualCamera = () => {
               onUnlockFocus={toggleFocusLock}
               onViewportLayout={handlePrimaryViewportLayout}
               onPreviewRef={setPrimaryPreviewRef}
-              onTapFocus={focusPrimaryCameraAtPoint}
+              onSingleTap={focusPrimaryCameraAtPoint}
+              onDoubleTap={handlePrimaryPreviewDoubleTap}
               tapFocusPoint={tapFocusPoint}
             />
             <View style={styles.splitDivider} />
@@ -2491,6 +3011,7 @@ const DualCamera = () => {
               ratio={ratio}
               gridEnabled={gridEnabled}
               secondary
+              onDoubleTap={flipPrimaryCamera}
             />
           </>
         ) : (
@@ -2505,7 +3026,8 @@ const DualCamera = () => {
             onUnlockFocus={toggleFocusLock}
             onViewportLayout={handlePrimaryViewportLayout}
             onPreviewRef={setPrimaryPreviewRef}
-            onTapFocus={focusPrimaryCameraAtPoint}
+            onSingleTap={focusPrimaryCameraAtPoint}
+            onDoubleTap={handlePrimaryPreviewDoubleTap}
             tapFocusPoint={tapFocusPoint}
             full
           />
@@ -2569,6 +3091,23 @@ const DualCamera = () => {
             onToggleStabilizationMode={toggleStabilizationMode}
             onToggleMenu={() => setPanel(panel === 'menu' ? null : 'menu')}
           />
+        )}
+
+        {aiSceneEnabled && sceneHint && panel == null && (
+          <View
+            pointerEvents="none"
+            style={[
+              styles.sceneHintWrap,
+              { top: insets.top + (topVisible ? 62 : 16) },
+            ]}
+          >
+            <View style={styles.sceneHintCard}>
+              <Text style={styles.sceneHintLabel}>{sceneHint.label}</Text>
+              <Text style={styles.sceneHintSuggestion}>
+                {sceneHint.suggestion}
+              </Text>
+            </View>
+          </View>
         )}
 
         {panel === 'zoom' && (
@@ -2657,6 +3196,15 @@ const DualCamera = () => {
           <BottomCameraToolbar
             mode={mode}
             layoutLabel={layoutLabel}
+            videoStatusText={
+              mode === 'video'
+                ? getVideoStatusLabel(
+                    videoResolution,
+                    videoFrameRate,
+                    audioChannelMode,
+                  )
+                : null
+            }
             recording={recording}
             recordingSeconds={recordingSeconds}
             captureBusy={captureBusy}
@@ -2667,14 +3215,16 @@ const DualCamera = () => {
               if (recording) {
                 stopVideoRecording()
               }
-              flashModeTransition(() => setMode('photo'))
+              flashModeTransition(async () => {
+                videoWarmupPendingRef.current = false
+                setMode('photo')
+                await configurePhotoSession()
+              })
             }}
             onSetVideoMode={enterVideoMode}
             onToggleLayout={togglePreviewLayout}
             onOpenGallery={openGallery}
-            onFlipPrimaryCamera={() =>
-              setPrimaryCamera(value => (value === 'rear' ? 'front' : 'rear'))
-            }
+            onFlipPrimaryCamera={flipPrimaryCamera}
             onPressShutter={handleShutter}
             onToggleQuickPanel={() =>
               setPanel(panel === 'quick' ? null : 'quick')
@@ -2793,10 +3343,15 @@ const DualCamera = () => {
             photoHDRSupported={photoHDRSupported}
             lensSwitchHintEnabled={lensSwitchHintEnabled}
             videoResolution={videoResolution}
+            videoFrameRate={videoFrameRate}
+            videoFrameRateOptions={availableVideoFrameRates}
+            audioChannelMode={audioChannelMode}
+            audioQualityMode={audioQualityMode}
             dualVideoComposeMode={effectiveDualVideoComposeMode}
             videoSaveMode={videoSaveMode}
             proVideoEnabled={proVideoEnabled}
             volumeShutterEnabled={volumeShutterEnabled}
+            saveLocationEnabled={saveLocationEnabled}
             pipBorderVisible={pipBorderVisible}
             reduceTransparencyEnabled={reduceTransparencyEnabled}
             flashIndicatorEnabled={flashIndicatorEnabled}
@@ -2807,10 +3362,14 @@ const DualCamera = () => {
             onTogglePhotoHDR={togglePhotoHDRSetting}
             onToggleLensSwitchHint={setLensSwitchHintEnabled}
             onSetVideoResolution={selectVideoResolution}
+            onSetVideoFrameRate={selectVideoFrameRate}
+            onSetAudioChannelMode={selectAudioChannelMode}
+            onSetAudioQualityMode={selectAudioQualityMode}
             onSetDualVideoComposeMode={selectDualVideoComposeMode}
             onSetVideoSaveMode={setVideoSaveMode}
             onToggleProVideo={toggleProVideoSetting}
             onToggleVolumeShutter={toggleVolumeShutterSetting}
+            onToggleSaveLocation={toggleSaveLocationSetting}
             onTogglePipBorder={togglePipBorderSetting}
             onToggleReduceTransparency={setReduceTransparencyEnabled}
             onToggleFlashIndicator={setFlashIndicatorEnabled}
@@ -3000,6 +3559,35 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.72)',
     fontSize: 12,
     fontWeight: '400',
+  },
+  sceneHintWrap: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    alignItems: 'center',
+    zIndex: 18,
+  },
+  sceneHintCard: {
+    maxWidth: 280,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    backgroundColor: 'rgba(18,19,22,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    alignItems: 'center',
+  },
+  sceneHintLabel: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  sceneHintSuggestion: {
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.76)',
+    fontSize: 12,
+    lineHeight: 17,
+    textAlign: 'center',
   },
   captureFlash: {
     ...StyleSheet.absoluteFillObject,

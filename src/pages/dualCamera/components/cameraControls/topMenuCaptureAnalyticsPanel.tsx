@@ -34,8 +34,12 @@ const formatFilter = (filterId: string) => {
   if (filterId === 'none') return '原图'
   if (filterId === 'mono') return '黑白'
   if (filterId === 'quality:standard') return '质量：标准'
-  if (filterId === 'quality:original') return '质量：原图'
-  if (filterId === 'quality:high') return '质量：高清'
+  if (
+    filterId === 'quality:4k' ||
+    filterId === 'quality:high' ||
+    filterId === 'quality:original'
+  )
+    return '质量：4K'
   return filterId
 }
 
