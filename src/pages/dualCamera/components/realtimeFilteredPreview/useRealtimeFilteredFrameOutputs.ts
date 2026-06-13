@@ -82,26 +82,24 @@ export const useRealtimeFilteredFrameOutputs = ({
         let snapshot: SkImage | undefined
 
         try {
-          if (!enabled) {
-            return
-          }
-
-          snapshot = renderToTexture(frame, ({ canvas, frameTexture }) => {
-            drawRealtimeFilteredFrame({
-              canvas,
-              frameTexture,
-              assets: renderAssets,
+          if (enabled) {
+            snapshot = renderToTexture(frame, ({ canvas, frameTexture }) => {
+              drawRealtimeFilteredFrame({
+                canvas,
+                frameTexture,
+                assets: renderAssets,
+              })
             })
-          })
 
-          const snapshotCpuCopy = snapshot.makeNonTextureImage()
-          if (snapshotCpuCopy == null) {
-            throw new Error(
-              `Failed to create CPU copy for ${side} realtime filter preview.`,
-            )
+            const snapshotCpuCopy = snapshot.makeNonTextureImage()
+            if (snapshotCpuCopy == null) {
+              throw new Error(
+                `Failed to create CPU copy for ${side} realtime filter preview.`,
+              )
+            }
+
+            scheduleOnRN(updatePreviewTexture, side, snapshotCpuCopy)
           }
-
-          scheduleOnRN(updatePreviewTexture, side, snapshotCpuCopy)
         } catch (error) {
           console.error(`Realtime filter render failed on ${side}! ${error}`)
         } finally {

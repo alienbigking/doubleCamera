@@ -11,6 +11,7 @@ RCT_EXTERN_METHOD(composeDualVideo:(NSString *)rearVideoPath
                   pipHeight:(nonnull NSNumber *)pipHeight
                   previewWidth:(nonnull NSNumber *)previewWidth
                   previewHeight:(nonnull NSNumber *)previewHeight
+                  aspectRatio:(nonnull NSNumber *)aspectRatio
                   primaryCamera:(NSString *)primaryCamera
                   pipBorderVisible:(BOOL)pipBorderVisible
                   resolver:(RCTPromiseResolveBlock)resolve

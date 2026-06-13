@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native'
 import type { DualVideoComposeMode } from './cameraControls'
+import { resolvePhotoOutputAspectRatio } from './photoOutputRatio'
 
 type CameraSide = 'rear' | 'front'
 type Point = { x: number; y: number }
@@ -13,6 +14,7 @@ type ComposeDualVideoOptions = {
   pipPosition: Point
   pipSize: Size
   previewSize: Size
+  ratio?: string
   pipBorderVisible?: boolean
 }
 
@@ -27,6 +29,7 @@ type DualVideoComposerModule = {
     pipHeight: number,
     previewWidth: number,
     previewHeight: number,
+    aspectRatio: number,
     primaryCamera: CameraSide,
     pipBorderVisible: boolean,
   ) => Promise<string>
@@ -55,14 +58,23 @@ export const composeDualVideo = async ({
   pipPosition,
   pipSize,
   previewSize,
+  ratio,
   pipBorderVisible = true,
 }: ComposeDualVideoOptions) => {
   if (Platform.OS !== 'ios') {
-    throw new Error('Dual video composition is currently only implemented on iOS.')
+    throw new Error(
+      'Dual video composition is currently only implemented on iOS.',
+    )
   }
   if (!nativeComposer?.composeDualVideo) {
     throw new Error('DualVideoComposer native module is not available.')
   }
+
+  const aspectRatio =
+    resolvePhotoOutputAspectRatio({
+      ratio,
+      previewSize,
+    }) || 0
 
   return nativeComposer.composeDualVideo(
     findVideoPath(videos, 'rear'),
@@ -74,6 +86,7 @@ export const composeDualVideo = async ({
     pipSize.height,
     previewSize.width,
     previewSize.height,
+    aspectRatio,
     primaryCamera,
     pipBorderVisible,
   )

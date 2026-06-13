@@ -8,6 +8,7 @@ import {
 // 专业模式状态条：在主界面上简要显示当前手动参数，避免状态丢失。
 export const ProfessionalStatusStrip = ({
   bottom,
+  horizontalInset,
   iso,
   shutterDuration,
   focusPosition,
@@ -17,6 +18,7 @@ export const ProfessionalStatusStrip = ({
   onPressFocus,
 }: {
   bottom: number
+  horizontalInset: number
   iso: number
   shutterDuration: number
   focusPosition: number
@@ -25,17 +27,25 @@ export const ProfessionalStatusStrip = ({
   onPressShutter: () => void
   onPressFocus: () => void
 }) => (
-  <View style={[styles.strip, { bottom }]}>
-    <StatusChip label="PRO" accent onPress={onPressPro} />
-    <StatusChip label={`ISO ${Math.round(iso)}`} onPress={onPressISO} />
-    <StatusChip
-      label={`S ${formatShutterDuration(shutterDuration)}`}
-      onPress={onPressShutter}
-    />
-    <StatusChip
-      label={`MF ${formatFocusPercent(focusPosition)}`}
-      onPress={onPressFocus}
-    />
+  <View style={[styles.strip, { bottom, paddingHorizontal: horizontalInset }]}>
+    <View style={styles.slot}>
+      <StatusChip label="PRO" accent onPress={onPressPro} />
+    </View>
+    <View style={styles.slot}>
+      <StatusChip label={`ISO ${Math.round(iso)}`} onPress={onPressISO} />
+    </View>
+    <View style={styles.slot}>
+      <StatusChip
+        label={`S ${formatShutterDuration(shutterDuration)}`}
+        onPress={onPressShutter}
+      />
+    </View>
+    <View style={styles.slot}>
+      <StatusChip
+        label={`MF ${formatFocusPercent(focusPosition)}`}
+        onPress={onPressFocus}
+      />
+    </View>
   </View>
 )
 
@@ -62,13 +72,21 @@ const StatusChip = ({
 const styles = StyleSheet.create({
   strip: {
     position: 'absolute',
-    left: 16,
-    right: 16,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
+  },
+  slot: {
+    flex: 1,
+    flexBasis: 0,
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
   },
   chip: {
     height: 34,
+    width: '100%',
     paddingHorizontal: 12,
     borderRadius: 17,
     alignItems: 'center',

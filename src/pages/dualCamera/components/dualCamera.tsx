@@ -260,6 +260,34 @@ const getVideoTargetBitRate = (
   return Math.round(baseBitRate * frameMultiplier * qualityMultiplier)
 }
 
+const buildVideoOutputConfig = ({
+  resolution,
+  frameRate,
+  audioChannelMode,
+  audioQualityMode,
+}: {
+  resolution: VideoResolutionMode
+  frameRate: VideoFrameRateMode
+  audioChannelMode: AudioChannelMode
+  audioQualityMode: AudioQualityMode
+}) => {
+  const enableHigherResolutionCodecs = resolution === '4k' || frameRate >= 60
+  const enableVideoAudio = audioChannelMode !== 'off'
+  const targetBitRate = getVideoTargetBitRate(
+    resolution,
+    frameRate,
+    audioQualityMode,
+  )
+
+  return {
+    targetResolution: videoResolutionConfig[resolution].resolution,
+    enableAudio: enableVideoAudio,
+    enableHigherResolutionCodecs,
+    targetBitRate,
+    fileType: 'mp4' as const,
+  }
+}
+
 const createEmptyCaptureAnalyticsStats = (): CaptureAnalyticsStats => {
   const now = new Date().toISOString()
 
@@ -473,6 +501,7 @@ const requestGalleryReadPermission = async () => {
 
 const DualCamera = () => {
   const insets = useSafeAreaInsets()
+  const homeControlsHorizontalInset = 12
   const [mode, setMode] = useState<CaptureMode>('photo')
   const [layout, setLayout] = useState<LayoutMode>('pip')
   const [panel, setPanel] = useState<Panel>(null)
@@ -510,7 +539,7 @@ const DualCamera = () => {
   const [reduceTransparencyEnabled, setReduceTransparencyEnabled] =
     useState(false)
   const [flashIndicatorEnabled, setFlashIndicatorEnabled] = useState(true)
-  const [aiSceneEnabled, setAiSceneEnabled] = useState(true)
+  const [aiSceneEnabled, setAiSceneEnabled] = useState(false)
   const [smartHDREnabled, setSmartHDREnabled] = useState(true)
   const [lowLightBoostEnabled, setLowLightBoostEnabled] = useState(false)
   const [smoothFocusEnabled, setSmoothFocusEnabled] = useState(true)
@@ -579,11 +608,13 @@ const DualCamera = () => {
   const previewOutputsRef = useRef<PreviewOutputs>({})
   const videoOutputsRef = useRef<VideoOutputs>({})
   const frameOutputsRef = useRef<FrameOutputs>({})
+  const sceneObjectOutputsRef = useRef<ObjectOutputs>({})
   const sceneSignalsRef = useRef<SceneSignals>(createEmptySceneSignals())
   const recordersRef = useRef<Recorders>({})
   const recordingFinishedRef = useRef<Promise<RecordedVideo>[]>([])
   const captureBusyRef = useRef(false)
   const videoConfigurePromiseRef = useRef<Promise<boolean> | null>(null)
+  const sessionStopPromiseRef = useRef<Promise<void> | null>(null)
   const modeTransitionOpacity = useRef(new Animated.Value(0)).current
   const modeTransitionScale = useRef(new Animated.Value(1)).current
   const captureFlashOpacity = useRef(new Animated.Value(0)).current
@@ -595,6 +626,21 @@ const DualCamera = () => {
     null,
   )
   const tapFocusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const professionalIsoApplyTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
+  const professionalFocusApplyTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
+  const professionalShutterApplyTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null)
+  const professionalIsoPendingRef = useRef<number | null>(null)
+  const professionalFocusPendingRef = useRef<number | null>(null)
+  const professionalShutterPendingRef = useRef<number | null>(null)
+  const professionalIsoApplyingRef = useRef(false)
+  const professionalFocusApplyingRef = useRef(false)
+  const professionalShutterApplyingRef = useRef(false)
   const pipLastTapAtRef = useRef(0)
   const pipPositionRef = useRef(pipPosition)
   const pipDragStartRef = useRef(pipPosition)
@@ -607,7 +653,6 @@ const DualCamera = () => {
   const toneAdjustmentsEnabled = hasProfessionalToneAdjustments(toneAdjustments)
   const realtimeFilterEnabled =
     mode === 'photo' && (selectedFilterId !== 'none' || toneAdjustmentsEnabled)
-  const enableSceneObjectStreaming = aiSceneEnabled && shouldUseDualPhotoSession
   const {
     frameOutputs: realtimeFilterFrameOutputs,
     textures: realtimeTextures,
@@ -616,18 +661,6 @@ const DualCamera = () => {
     filterId: selectedFilterId,
     toneAdjustments,
   })
-  const sceneObjectOutputs = useMemo<ObjectOutputs>(() => {
-    if (Platform.OS !== 'ios') return {}
-
-    return {
-      rear: VisionCamera.createObjectOutput({
-        enabledObjectTypes: ['face'],
-      }),
-      front: VisionCamera.createObjectOutput({
-        enabledObjectTypes: ['face'],
-      }),
-    }
-  }, [])
 
   const loadCaptureAnalyticsStats = useCallback(async () => {
     try {
@@ -677,8 +710,8 @@ const DualCamera = () => {
   }, [pipPosition])
 
   useEffect(() => {
-    const rearOutput = sceneObjectOutputs.rear
-    const frontOutput = sceneObjectOutputs.front
+    const rearOutput = sceneObjectOutputsRef.current.rear
+    const frontOutput = sceneObjectOutputsRef.current.front
 
     if (!rearOutput || !frontOutput) return
 
@@ -718,7 +751,7 @@ const DualCamera = () => {
       rearOutput.setOnObjectsScannedCallback(undefined)
       frontOutput.setOnObjectsScannedCallback(undefined)
     }
-  }, [aiSceneEnabled, sceneObjectOutputs])
+  }, [aiSceneEnabled, previewStatus])
 
   useEffect(() => {
     loadCaptureAnalyticsStats()
@@ -779,6 +812,15 @@ const DualCamera = () => {
       }
       if (controlStatusTimerRef.current) {
         clearTimeout(controlStatusTimerRef.current)
+      }
+      if (professionalIsoApplyTimerRef.current) {
+        clearTimeout(professionalIsoApplyTimerRef.current)
+      }
+      if (professionalFocusApplyTimerRef.current) {
+        clearTimeout(professionalFocusApplyTimerRef.current)
+      }
+      if (professionalShutterApplyTimerRef.current) {
+        clearTimeout(professionalShutterApplyTimerRef.current)
       }
     },
     [],
@@ -974,6 +1016,15 @@ const DualCamera = () => {
           return
         }
 
+        const pendingSessionStop = sessionStopPromiseRef.current
+        if (pendingSessionStop) {
+          await pendingSessionStop.catch(() => undefined)
+          if (sessionStopPromiseRef.current === pendingSessionStop) {
+            sessionStopPromiseRef.current = null
+          }
+          if (cancelled) return
+        }
+
         const deviceFactory = await VisionCamera.createDeviceFactory()
         const cameraPair = findFrontBackCombination(
           deviceFactory.supportedMultiCamDeviceCombinations,
@@ -992,12 +1043,20 @@ const DualCamera = () => {
         const frontFrameOutput = realtimeFilterEnabled
           ? realtimeFilterFrameOutputs.front
           : undefined
-        const rearObjectOutput = enableSceneObjectStreaming
-          ? sceneObjectOutputs.rear
-          : undefined
-        const frontObjectOutput = enableSceneObjectStreaming
-          ? sceneObjectOutputs.front
-          : undefined
+        const sceneObjectOutputs: ObjectOutputs =
+          Platform.OS === 'ios' && aiSceneEnabled
+            ? {
+                rear: VisionCamera.createObjectOutput({
+                  enabledObjectTypes: ['face'],
+                }),
+                front: VisionCamera.createObjectOutput({
+                  enabledObjectTypes: ['face'],
+                }),
+              }
+            : {}
+        sceneObjectOutputsRef.current = sceneObjectOutputs
+        const rearObjectOutput = sceneObjectOutputs.rear
+        const frontObjectOutput = sceneObjectOutputs.front
         const rearPhotoOutput = VisionCamera.createPhotoOutput({
           targetResolution: CommonResolutions.UHD_4_3,
           containerFormat: 'jpeg',
@@ -1010,6 +1069,22 @@ const DualCamera = () => {
           quality: 0.96,
           qualityPrioritization: 'quality',
         })
+        const rearVideoOutput = VisionCamera.createVideoOutput(
+          buildVideoOutputConfig({
+            resolution: videoResolution,
+            frameRate: videoFrameRate,
+            audioChannelMode,
+            audioQualityMode,
+          }),
+        )
+        const frontVideoOutput = VisionCamera.createVideoOutput(
+          buildVideoOutputConfig({
+            resolution: videoResolution,
+            frameRate: videoFrameRate,
+            audioChannelMode,
+            audioQualityMode,
+          }),
+        )
         const session = await VisionCamera.createCameraSession(true)
         const rearLensOptions = getRearLensOptions(cameraPair.rear)
         const initialLens =
@@ -1029,6 +1104,22 @@ const DualCamera = () => {
         const frontPhotoConstraints = photoHDRActive
           ? [{ photoHDR: true }, { resolutionBias: frontPhotoOutput }]
           : [{ resolutionBias: frontPhotoOutput }]
+        const rearInitialConstraints = [
+          ...rearPhotoConstraints,
+          { fps: videoFrameRate },
+          ...(stabilizationMode !== 'off' &&
+          cameraPair.rear.supportsVideoStabilizationMode(stabilizationMode)
+            ? [{ videoStabilizationMode: stabilizationMode }]
+            : []),
+        ]
+        const frontInitialConstraints = [
+          ...frontPhotoConstraints,
+          { fps: videoFrameRate },
+          ...(stabilizationMode !== 'off' &&
+          cameraPair.front.supportsVideoStabilizationMode(stabilizationMode)
+            ? [{ videoStabilizationMode: stabilizationMode }]
+            : []),
+        ]
 
         const controllers = await session.configure([
           {
@@ -1042,8 +1133,9 @@ const DualCamera = () => {
                 ? [{ output: rearObjectOutput, mirrorMode: 'off' as const }]
                 : []),
               { output: rearPhotoOutput, mirrorMode: 'off' },
+              { output: rearVideoOutput, mirrorMode: 'off' },
             ],
-            constraints: rearPhotoConstraints,
+            constraints: rearInitialConstraints,
             initialZoom: initialLens.zoomValue,
           },
           {
@@ -1057,8 +1149,9 @@ const DualCamera = () => {
                 ? [{ output: frontObjectOutput, mirrorMode: 'on' as const }]
                 : []),
               { output: frontPhotoOutput, mirrorMode: 'on' },
+              { output: frontVideoOutput, mirrorMode: 'on' },
             ],
-            constraints: frontPhotoConstraints,
+            constraints: frontInitialConstraints,
           },
         ])
 
@@ -1082,12 +1175,15 @@ const DualCamera = () => {
             rear: rearPhotoOutput,
             front: frontPhotoOutput,
           }
+          videoOutputsRef.current = {
+            rear: rearVideoOutput,
+            front: frontVideoOutput,
+          }
           rearCameraControllerRef.current = controllers[0] || null
           frontCameraControllerRef.current = controllers[1] || null
           await applyAiEnhancementSettings(controllers[0] || null)
           syncProfessionalDefaultsFromController(controllers[0] || null)
-          videoOutputsRef.current = {}
-          setVideoCaptureReady(false)
+          setVideoCaptureReady(true)
           setLensOptions(rearLensOptions)
           setSelectedLensId(initialLens.id)
           setRearHasFlash(cameraPair.rear.hasFlash)
@@ -1132,20 +1228,51 @@ const DualCamera = () => {
       photoOutputsRef.current = {}
       videoOutputsRef.current = {}
       frameOutputsRef.current = {}
+      sceneObjectOutputsRef.current = {}
       recordersRef.current = {}
       recordingFinishedRef.current = []
 
       const session = cameraSessionRef.current
       cameraSessionRef.current = null
       if (session) {
-        session.stop().catch(() => undefined)
+        sessionStopPromiseRef.current = session.stop().catch(() => undefined)
       }
       if (tapFocusTimerRef.current) {
         clearTimeout(tapFocusTimerRef.current)
         tapFocusTimerRef.current = null
       }
     }
-  }, [photoHDREnabled, realtimeFilterFrameOutputs, sceneObjectOutputs])
+  }, [aiSceneEnabled, photoHDREnabled, realtimeFilterFrameOutputs])
+
+  useEffect(() => {
+    if (previewStatus !== 'ready' || mode !== 'photo') return
+
+    const hasRealtimeFrameOutputs =
+      !!frameOutputsRef.current.rear && !!frameOutputsRef.current.front
+
+    if (hasRealtimeFrameOutputs === realtimeFilterEnabled) return
+
+    frameOutputsRef.current = realtimeFilterEnabled
+      ? {
+          rear: realtimeFilterFrameOutputs.rear,
+          front: realtimeFilterFrameOutputs.front,
+        }
+      : {}
+
+    configurePhotoSession().catch(error => {
+      console.warn(
+        'Reconfigure photo session for realtime filter failed',
+        error,
+      )
+      showControlStatusMessage('实时滤镜切换失败')
+    })
+  }, [
+    mode,
+    previewStatus,
+    realtimeFilterEnabled,
+    realtimeFilterFrameOutputs.front,
+    realtimeFilterFrameOutputs.rear,
+  ])
 
   useEffect(() => {
     if (!recording) return
@@ -1205,17 +1332,21 @@ const DualCamera = () => {
     Platform.OS === 'ios' && !!rearController?.device.supportsExposureLocking
   const supportsProfessionalFocus =
     Platform.OS === 'ios' && !!rearController?.device.supportsFocusLocking
+  const professionalMinShutterDuration = supportsProfessionalExposure
+    ? rearController?.minExposureDuration || defaultProfessionalShutterDuration
+    : defaultProfessionalShutterDuration
+  const professionalMaxShutterDuration = supportsProfessionalExposure
+    ? rearController?.maxExposureDuration || defaultProfessionalShutterDuration
+    : defaultProfessionalShutterDuration
   const professionalShutterOptions = supportsProfessionalExposure
     ? getSupportedShutterPresets(
-        rearController?.minExposureDuration ||
-          defaultProfessionalShutterDuration,
-        rearController?.maxExposureDuration ||
-          defaultProfessionalShutterDuration,
+        professionalMinShutterDuration,
+        professionalMaxShutterDuration,
       )
     : [defaultProfessionalShutterDuration]
 
-  const topVisible = showTopBar || panel !== null
-  const bottomVisible = showBottomBar || panel !== null
+  const topVisible = true
+  const bottomVisible = true
 
   const closeFloatingPanels = () => {
     if (panel) setPanel(null)
@@ -1481,6 +1612,112 @@ const DualCamera = () => {
     return true
   }
 
+  const scheduleProfessionalISOApply = useCallback(
+    (value: number) => {
+      professionalIsoPendingRef.current = value
+      if (professionalIsoApplyTimerRef.current) return
+
+      professionalIsoApplyTimerRef.current = setTimeout(() => {
+        professionalIsoApplyTimerRef.current = null
+
+        if (professionalIsoApplyingRef.current || !proMode) return
+
+        const pendingValue = professionalIsoPendingRef.current
+        if (pendingValue == null) return
+
+        professionalIsoApplyingRef.current = true
+        applyProfessionalExposureSettings(
+          Math.round(pendingValue),
+          proShutterDuration,
+        )
+          .catch(error => {
+            console.warn('Preview professional ISO failed', error)
+          })
+          .finally(() => {
+            professionalIsoApplyingRef.current = false
+            if (
+              professionalIsoPendingRef.current != null &&
+              Math.round(professionalIsoPendingRef.current) !==
+                Math.round(pendingValue)
+            ) {
+              scheduleProfessionalISOApply(professionalIsoPendingRef.current)
+            }
+          })
+      }, 28)
+    },
+    [applyProfessionalExposureSettings, proMode, proShutterDuration],
+  )
+
+  const scheduleProfessionalFocusApply = useCallback(
+    (value: number) => {
+      professionalFocusPendingRef.current = value
+      if (professionalFocusApplyTimerRef.current) return
+
+      professionalFocusApplyTimerRef.current = setTimeout(() => {
+        professionalFocusApplyTimerRef.current = null
+
+        if (professionalFocusApplyingRef.current || !proMode) return
+
+        const pendingValue = professionalFocusPendingRef.current
+        if (pendingValue == null) return
+
+        professionalFocusApplyingRef.current = true
+        applyProfessionalFocusSettings(pendingValue)
+          .catch(error => {
+            console.warn('Preview professional focus failed', error)
+          })
+          .finally(() => {
+            professionalFocusApplyingRef.current = false
+            if (
+              professionalFocusPendingRef.current != null &&
+              Math.abs(professionalFocusPendingRef.current - pendingValue) >
+                0.001
+            ) {
+              scheduleProfessionalFocusApply(
+                professionalFocusPendingRef.current,
+              )
+            }
+          })
+      }, 28)
+    },
+    [applyProfessionalFocusSettings, proMode],
+  )
+
+  const scheduleProfessionalShutterApply = useCallback(
+    (value: number) => {
+      professionalShutterPendingRef.current = value
+      if (professionalShutterApplyTimerRef.current) return
+
+      professionalShutterApplyTimerRef.current = setTimeout(() => {
+        professionalShutterApplyTimerRef.current = null
+
+        if (professionalShutterApplyingRef.current || !proMode) return
+
+        const pendingValue = professionalShutterPendingRef.current
+        if (pendingValue == null) return
+
+        professionalShutterApplyingRef.current = true
+        applyProfessionalExposureSettings(proISO, pendingValue)
+          .catch(error => {
+            console.warn('Preview professional shutter failed', error)
+          })
+          .finally(() => {
+            professionalShutterApplyingRef.current = false
+            if (
+              professionalShutterPendingRef.current != null &&
+              Math.abs(professionalShutterPendingRef.current - pendingValue) >
+                0.0001
+            ) {
+              scheduleProfessionalShutterApply(
+                professionalShutterPendingRef.current,
+              )
+            }
+          })
+      }, 28)
+    },
+    [applyProfessionalExposureSettings, proISO, proMode],
+  )
+
   const toggleProfessionalMode = async (enabled: boolean) => {
     const controller = rearCameraControllerRef.current
     if (!controller) return
@@ -1529,16 +1766,23 @@ const DualCamera = () => {
     const controller = rearCameraControllerRef.current
     if (!controller || !controller.device.supportsExposureLocking) return
 
-    setProISO(
-      clampNumber(
-        Math.round(value),
-        controller.minISO > 0 ? controller.minISO : 1,
-        controller.maxISO > 0 ? controller.maxISO : Math.max(1, value),
-      ),
+    const nextValue = clampNumber(
+      Math.round(value),
+      controller.minISO > 0 ? controller.minISO : 1,
+      controller.maxISO > 0 ? controller.maxISO : Math.max(1, value),
     )
+    setProISO(nextValue)
+    if (proMode) {
+      scheduleProfessionalISOApply(nextValue)
+    }
   }
 
   const commitProfessionalISO = async (value: number) => {
+    if (professionalIsoApplyTimerRef.current) {
+      clearTimeout(professionalIsoApplyTimerRef.current)
+      professionalIsoApplyTimerRef.current = null
+    }
+    professionalIsoPendingRef.current = Math.round(value)
     previewProfessionalISO(value)
     if (!proMode) return
 
@@ -1565,11 +1809,44 @@ const DualCamera = () => {
     }
   }
 
+  const previewProfessionalShutter = (value: number) => {
+    setProShutterDuration(value)
+    if (proMode) {
+      scheduleProfessionalShutterApply(value)
+    }
+  }
+
+  const commitProfessionalShutter = async (value: number) => {
+    if (professionalShutterApplyTimerRef.current) {
+      clearTimeout(professionalShutterApplyTimerRef.current)
+      professionalShutterApplyTimerRef.current = null
+    }
+    professionalShutterPendingRef.current = value
+    previewProfessionalShutter(value)
+    if (!proMode) return
+
+    try {
+      await applyProfessionalExposureSettings(proISO, value)
+    } catch (error) {
+      console.warn('Commit professional shutter failed', error)
+      showControlStatusMessage('快门设置失败')
+    }
+  }
+
   const previewProfessionalFocusPosition = (value: number) => {
-    setProFocusPosition(clampNumber(value, 0, 1))
+    const nextValue = clampNumber(value, 0, 1)
+    setProFocusPosition(nextValue)
+    if (proMode) {
+      scheduleProfessionalFocusApply(nextValue)
+    }
   }
 
   const commitProfessionalFocusPosition = async (value: number) => {
+    if (professionalFocusApplyTimerRef.current) {
+      clearTimeout(professionalFocusApplyTimerRef.current)
+      professionalFocusApplyTimerRef.current = null
+    }
+    professionalFocusPendingRef.current = value
     previewProfessionalFocusPosition(value)
     if (!proMode) return
 
@@ -1582,21 +1859,13 @@ const DualCamera = () => {
   }
 
   const handleTopBarVisibilityChange = (value: boolean) => {
-    if (!value && !showBottomBar) {
-      showControlStatusMessage('至少保留一个工具栏')
-      return
-    }
-
     setShowTopBar(value)
+    showControlStatusMessage(value ? '顶部工具栏已显示' : '顶部工具栏已精简')
   }
 
   const handleBottomBarVisibilityChange = (value: boolean) => {
-    if (!value && !showTopBar) {
-      showControlStatusMessage('至少保留一个工具栏')
-      return
-    }
-
     setShowBottomBar(value)
+    showControlStatusMessage(value ? '底部工具栏已显示' : '底部工具栏已精简')
   }
 
   const resetCaptureSettings = () => {
@@ -2346,39 +2615,41 @@ const DualCamera = () => {
       const cameraPair = cameraPairRef.current
       const rearPreviewOutput = previewOutputsRef.current.rear
       const frontPreviewOutput = previewOutputsRef.current.front
+      const rearPhotoOutput = photoOutputsRef.current.rear
+      const frontPhotoOutput = photoOutputsRef.current.front
+      const rearFrameOutput = frameOutputsRef.current.rear
+      const frontFrameOutput = frameOutputsRef.current.front
+      const rearObjectOutput = sceneObjectOutputsRef.current.rear
+      const frontObjectOutput = sceneObjectOutputsRef.current.front
 
       if (
         !session ||
         !cameraPair ||
         !rearPreviewOutput ||
-        !frontPreviewOutput
+        !frontPreviewOutput ||
+        !rearPhotoOutput ||
+        !frontPhotoOutput
       ) {
         return false
       }
 
       const selectedVideoConfig = videoResolutionConfig[videoResolution]
-      const enableHigherResolutionCodecs =
-        videoResolution === '4k' || videoFrameRate >= 60
-      const enableVideoAudio = audioChannelMode !== 'off'
-      const targetBitRate = getVideoTargetBitRate(
-        videoResolution,
-        videoFrameRate,
-        audioQualityMode,
+      const rearVideoOutput = VisionCamera.createVideoOutput(
+        buildVideoOutputConfig({
+          resolution: videoResolution,
+          frameRate: videoFrameRate,
+          audioChannelMode,
+          audioQualityMode,
+        }),
       )
-      const rearVideoOutput = VisionCamera.createVideoOutput({
-        targetResolution: selectedVideoConfig.resolution,
-        enableAudio: enableVideoAudio,
-        enableHigherResolutionCodecs,
-        targetBitRate,
-        fileType: 'mp4',
-      })
-      const frontVideoOutput = VisionCamera.createVideoOutput({
-        targetResolution: selectedVideoConfig.resolution,
-        enableAudio: enableVideoAudio,
-        enableHigherResolutionCodecs,
-        targetBitRate,
-        fileType: 'mp4',
-      })
+      const frontVideoOutput = VisionCamera.createVideoOutput(
+        buildVideoOutputConfig({
+          resolution: videoResolution,
+          frameRate: videoFrameRate,
+          audioChannelMode,
+          audioQualityMode,
+        }),
+      )
       const selectedLens =
         lensOptions.find(option => option.id === selectedLensId) ||
         defaultLensOptions[0]
@@ -2405,6 +2676,13 @@ const DualCamera = () => {
         input: cameraPair.rear,
         outputs: [
           { output: rearPreviewOutput, mirrorMode: 'off' as const },
+          ...(rearFrameOutput
+            ? [{ output: rearFrameOutput, mirrorMode: 'off' as const }]
+            : []),
+          ...(rearObjectOutput
+            ? [{ output: rearObjectOutput, mirrorMode: 'off' as const }]
+            : []),
+          { output: rearPhotoOutput, mirrorMode: 'off' as const },
           { output: rearVideoOutput, mirrorMode: 'off' as const },
         ],
         constraints: rearConstraints,
@@ -2416,6 +2694,13 @@ const DualCamera = () => {
           input: cameraPair.front,
           outputs: [
             { output: frontPreviewOutput, mirrorMode: 'on' as const },
+            ...(frontFrameOutput
+              ? [{ output: frontFrameOutput, mirrorMode: 'on' as const }]
+              : []),
+            ...(frontObjectOutput
+              ? [{ output: frontObjectOutput, mirrorMode: 'on' as const }]
+              : []),
+            { output: frontPhotoOutput, mirrorMode: 'on' as const },
             { output: frontVideoOutput, mirrorMode: 'on' as const },
           ],
           constraints: frontConstraints,
@@ -2527,8 +2812,8 @@ const DualCamera = () => {
     const selectedLens =
       lensOptions.find(option => option.id === selectedLensId) ||
       defaultLensOptions[0]
-    const rearObjectOutput = sceneObjectOutputs.rear
-    const frontObjectOutput = sceneObjectOutputs.front
+    const rearObjectOutput = sceneObjectOutputsRef.current.rear
+    const frontObjectOutput = sceneObjectOutputsRef.current.front
     const rearPhotoHDRSupported = cameraPair.rear.supportsPhotoHDR
     const frontPhotoHDRSupported = cameraPair.front.supportsPhotoHDR
     const photoHDRActive =
@@ -2723,8 +3008,10 @@ const DualCamera = () => {
   const enterVideoMode = () => {
     flashModeTransition(() => {
       setMode('video')
-      videoWarmupPendingRef.current = true
-      showControlStatusMessage('正在准备录像')
+      if (!videoCaptureReady) {
+        videoWarmupPendingRef.current = true
+        showControlStatusMessage('正在准备录像')
+      }
     })
   }
 
@@ -2851,6 +3138,7 @@ const DualCamera = () => {
           pipPosition: localPipPosition,
           pipSize,
           previewSize,
+          ratio,
           pipBorderVisible,
         })
         const combinedFileInfo = await getExistingFileInfo(combinedVideoUri)
@@ -3078,6 +3366,8 @@ const DualCamera = () => {
         {topVisible && (
           <TopCameraToolbar
             top={insets.top + 14}
+            horizontalInset={homeControlsHorizontalInset}
+            expanded={showTopBar}
             selectedLens={selectedLens}
             flashMode={flashMode}
             flashAvailable={rearHasFlash}
@@ -3122,6 +3412,7 @@ const DualCamera = () => {
         {professionalStripVisible && (
           <ProfessionalStatusStrip
             bottom={insets.bottom + 196}
+            horizontalInset={homeControlsHorizontalInset}
             iso={proISO}
             shutterDuration={proShutterDuration}
             focusPosition={proFocusPosition}
@@ -3146,10 +3437,14 @@ const DualCamera = () => {
             minISO={rearController?.minISO || 1}
             maxISO={rearController?.maxISO || Math.max(1, proISO)}
             shutterDuration={proShutterDuration}
+            minShutterDuration={professionalMinShutterDuration}
+            maxShutterDuration={professionalMaxShutterDuration}
             shutterOptions={professionalShutterOptions}
             focusPosition={proFocusPosition}
             onPreviewISO={previewProfessionalISO}
             onCommitISO={commitProfessionalISO}
+            onPreviewShutter={previewProfessionalShutter}
+            onCommitShutter={commitProfessionalShutter}
             onSelectShutter={selectProfessionalShutter}
             onPreviewFocus={previewProfessionalFocusPosition}
             onCommitFocus={commitProfessionalFocusPosition}
@@ -3164,10 +3459,14 @@ const DualCamera = () => {
             minISO={rearController?.minISO || 1}
             maxISO={rearController?.maxISO || Math.max(1, proISO)}
             shutterDuration={proShutterDuration}
+            minShutterDuration={professionalMinShutterDuration}
+            maxShutterDuration={professionalMaxShutterDuration}
             shutterOptions={professionalShutterOptions}
             focusPosition={proFocusPosition}
             onPreviewISO={previewProfessionalISO}
             onCommitISO={commitProfessionalISO}
+            onPreviewShutter={previewProfessionalShutter}
+            onCommitShutter={commitProfessionalShutter}
             onSelectShutter={selectProfessionalShutter}
             onPreviewFocus={previewProfessionalFocusPosition}
             onCommitFocus={commitProfessionalFocusPosition}
@@ -3182,10 +3481,14 @@ const DualCamera = () => {
             minISO={rearController?.minISO || 1}
             maxISO={rearController?.maxISO || Math.max(1, proISO)}
             shutterDuration={proShutterDuration}
+            minShutterDuration={professionalMinShutterDuration}
+            maxShutterDuration={professionalMaxShutterDuration}
             shutterOptions={professionalShutterOptions}
             focusPosition={proFocusPosition}
             onPreviewISO={previewProfessionalISO}
             onCommitISO={commitProfessionalISO}
+            onPreviewShutter={previewProfessionalShutter}
+            onCommitShutter={commitProfessionalShutter}
             onSelectShutter={selectProfessionalShutter}
             onPreviewFocus={previewProfessionalFocusPosition}
             onCommitFocus={commitProfessionalFocusPosition}
@@ -3196,6 +3499,7 @@ const DualCamera = () => {
           <BottomCameraToolbar
             mode={mode}
             layoutLabel={layoutLabel}
+            expanded={showBottomBar}
             videoStatusText={
               mode === 'video'
                 ? getVideoStatusLabel(
@@ -3210,15 +3514,15 @@ const DualCamera = () => {
             captureBusy={captureBusy}
             recordingBusy={recordingBusy}
             shutterScale={shutterScale}
+            horizontalInset={homeControlsHorizontalInset}
             reduceTransparency={reduceTransparencyEnabled}
             onSetPhotoMode={() => {
               if (recording) {
                 stopVideoRecording()
               }
-              flashModeTransition(async () => {
+              flashModeTransition(() => {
                 videoWarmupPendingRef.current = false
                 setMode('photo')
-                await configurePhotoSession()
               })
             }}
             onSetVideoMode={enterVideoMode}
@@ -3249,6 +3553,7 @@ const DualCamera = () => {
         {panel === 'topMenuProfessional' && (
           <TopMenuProfessionalPanel
             top={insets.top + 68}
+            captureMode={mode}
             enabled={proMode}
             exposureSupported={supportsProfessionalExposure}
             focusSupported={supportsProfessionalFocus}

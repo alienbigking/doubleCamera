@@ -18,7 +18,7 @@ final class DualVideoComposer: NSObject {
     false
   }
 
-  @objc(composeDualVideo:frontVideoPath:layout:pipX:pipY:pipWidth:pipHeight:previewWidth:previewHeight:primaryCamera:pipBorderVisible:resolver:rejecter:)
+  @objc(composeDualVideo:frontVideoPath:layout:pipX:pipY:pipWidth:pipHeight:previewWidth:previewHeight:aspectRatio:primaryCamera:pipBorderVisible:resolver:rejecter:)
   func composeDualVideo(
     rearVideoPath: String,
     frontVideoPath: String,
@@ -29,6 +29,7 @@ final class DualVideoComposer: NSObject {
     pipHeight: NSNumber,
     previewWidth: NSNumber,
     previewHeight: NSNumber,
+    aspectRatio: NSNumber,
     primaryCamera: String,
     pipBorderVisible: Bool,
     resolver resolve: @escaping RCTPromiseResolveBlock,
@@ -50,6 +51,7 @@ final class DualVideoComposer: NSObject {
             width: CGFloat(truncating: previewWidth),
             height: CGFloat(truncating: previewHeight)
           ),
+          aspectRatio: CGFloat(truncating: aspectRatio),
           primaryCamera: primaryCamera,
           pipBorderVisible: pipBorderVisible
         )
@@ -66,6 +68,7 @@ final class DualVideoComposer: NSObject {
     layout: String,
     pipRect: CGRect,
     previewSize: CGSize,
+    aspectRatio: CGFloat,
     primaryCamera: String,
     pipBorderVisible: Bool
   ) async throws -> URL {
@@ -94,7 +97,7 @@ final class DualVideoComposer: NSObject {
     let rearGeometry = try await videoGeometry(for: rearSourceTrack, side: "rear")
     let frontGeometry = try await videoGeometry(for: frontSourceTrack, side: "front")
     let primarySize = primaryCamera == "front" ? frontGeometry.orientedSize : rearGeometry.orientedSize
-    let outputSize = evenSize(primarySize)
+    let outputSize = outputSize(for: primarySize, aspectRatio: aspectRatio)
 
     let outputURL = FileManager.default.temporaryDirectory
       .appendingPathComponent(
@@ -115,6 +118,7 @@ final class DualVideoComposer: NSObject {
       layout: layout,
       pipRect: pipRect,
       previewSize: previewSize,
+      aspectRatio: aspectRatio,
       primaryCamera: primaryCamera,
       pipBorderVisible: pipBorderVisible
     )
@@ -142,6 +146,7 @@ final class DualVideoComposer: NSObject {
     layout: String,
     pipRect: CGRect,
     previewSize: CGSize,
+    aspectRatio: CGFloat,
     primaryCamera: String,
     pipBorderVisible: Bool
   ) throws {
@@ -254,7 +259,7 @@ final class DualVideoComposer: NSObject {
     NSLog(
       """
       DualVideoComposer render start version=track-transform-20260609-11 layout=\(layout) primary=\(primaryCamera) pipBorder=\(pipBorderVisible)
-      output=\(formatSize(outputSize)) preview=\(formatSize(previewSize))
+      output=\(formatSize(outputSize)) preview=\(formatSize(previewSize)) aspectRatio=\(formatNumber(aspectRatio))
       mainDestination=\(formatRect(mainDestination)) insetDestination=\(formatRect(insetDestination))
       rear natural=\(formatSize(rearGeometry.naturalSize)) oriented=\(formatSize(rearGeometry.orientedSize)) preferred=\(formatTransform(rearGeometry.preferredTransform)) orientation=\(orientationText(rearGeometry.orientation))
       front natural=\(formatSize(frontGeometry.naturalSize)) oriented=\(formatSize(frontGeometry.orientedSize)) preferred=\(formatTransform(frontGeometry.preferredTransform)) orientation=\(orientationText(frontGeometry.orientation))
@@ -741,6 +746,23 @@ final class DualVideoComposer: NSObject {
     return evenSize(
       CGSize(width: longSide, height: round(longSide * sourceSize.height / sourceSize.width))
     )
+  }
+
+  private func outputSize(for sourceSize: CGSize, aspectRatio: CGFloat) -> CGSize {
+    guard aspectRatio > 0 else {
+      return evenSize(sourceSize)
+    }
+
+    let longSide = max(sourceSize.width, sourceSize.height)
+    let fittedSize: CGSize
+
+    if aspectRatio >= 1 {
+      fittedSize = CGSize(width: longSide, height: round(longSide / aspectRatio))
+    } else {
+      fittedSize = CGSize(width: round(longSide * aspectRatio), height: longSide)
+    }
+
+    return evenSize(fittedSize)
   }
 
   private func evenSize(_ size: CGSize) -> CGSize {

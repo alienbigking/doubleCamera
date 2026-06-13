@@ -18,6 +18,8 @@ const getStabilizationIconName = (stabilizationMode: StabilizationMode) => {
 // 顶部工具栏组件：承载焦段入口、闪光灯、防抖和更多菜单入口。
 export const TopCameraToolbar = ({
   top,
+  horizontalInset,
+  expanded,
   selectedLens,
   flashMode,
   flashAvailable,
@@ -32,6 +34,8 @@ export const TopCameraToolbar = ({
   onToggleMenu,
 }: {
   top: number
+  horizontalInset: number
+  expanded: boolean
   selectedLens: LensOption
   flashMode: FlashMode
   flashAvailable: boolean
@@ -45,64 +49,73 @@ export const TopCameraToolbar = ({
   onToggleStabilizationMode: () => void
   onToggleMenu: () => void
 }) => (
-  <View style={[styles.topTools, { top }]}>
-    <TouchableOpacity
-      style={[styles.lensPill, reduceTransparency && styles.solidControl]}
-      activeOpacity={0.8}
-      onPress={onToggleLensPanel}
-    >
-      <Text style={styles.lensText}>{selectedLens.label}</Text>
-      <Text style={styles.chevron}>▾</Text>
-    </TouchableOpacity>
-    <View
-      style={[styles.featureGroup, reduceTransparency && styles.solidControl]}
-    >
-      {flashIndicatorVisible && (
-        <>
+  <View style={[styles.topTools, { top, paddingHorizontal: horizontalInset }]}>
+    {expanded ? (
+      <>
+        <TouchableOpacity
+          style={[styles.lensPill, reduceTransparency && styles.solidControl]}
+          activeOpacity={0.8}
+          onPress={onToggleLensPanel}
+        >
+          <Text style={styles.lensText}>{selectedLens.label}</Text>
+          <Text style={styles.chevron}>▾</Text>
+        </TouchableOpacity>
+        <View
+          style={[
+            styles.featureGroup,
+            reduceTransparency && styles.solidControl,
+          ]}
+        >
+          {flashIndicatorVisible && (
+            <>
+              <TouchableOpacity
+                style={[
+                  styles.featureIconButton,
+                  !flashAvailable && styles.featureIconButtonDisabled,
+                ]}
+                activeOpacity={0.8}
+                disabled={!flashAvailable}
+                onPress={onToggleFlashMode}
+              >
+                <MaterialIcons
+                  name={getFlashIconName(flashMode)}
+                  color={
+                    flashAvailable
+                      ? 'rgba(255,255,255,0.9)'
+                      : 'rgba(255,255,255,0.32)'
+                  }
+                  size={24}
+                />
+              </TouchableOpacity>
+              <View style={styles.featureDivider} />
+            </>
+          )}
           <TouchableOpacity
             style={[
               styles.featureIconButton,
-              !flashAvailable && styles.featureIconButtonDisabled,
+              !stabilizationAvailable && styles.featureIconButtonDisabled,
             ]}
             activeOpacity={0.8}
-            disabled={!flashAvailable}
-            onPress={onToggleFlashMode}
+            disabled={!stabilizationAvailable}
+            onPress={onToggleStabilizationMode}
           >
             <MaterialIcons
-              name={getFlashIconName(flashMode)}
+              name={getStabilizationIconName(stabilizationMode)}
               color={
-                flashAvailable
+                !stabilizationAvailable
+                  ? 'rgba(255,255,255,0.32)'
+                  : captureMode === 'photo' || stabilizationMode === 'off'
                   ? 'rgba(255,255,255,0.9)'
-                  : 'rgba(255,255,255,0.32)'
+                  : '#58e8ff'
               }
               size={24}
             />
           </TouchableOpacity>
-          <View style={styles.featureDivider} />
-        </>
-      )}
-      <TouchableOpacity
-        style={[
-          styles.featureIconButton,
-          !stabilizationAvailable && styles.featureIconButtonDisabled,
-        ]}
-        activeOpacity={0.8}
-        disabled={!stabilizationAvailable}
-        onPress={onToggleStabilizationMode}
-      >
-        <MaterialIcons
-          name={getStabilizationIconName(stabilizationMode)}
-          color={
-            !stabilizationAvailable
-              ? 'rgba(255,255,255,0.32)'
-              : captureMode === 'photo' || stabilizationMode === 'off'
-              ? 'rgba(255,255,255,0.9)'
-              : '#58e8ff'
-          }
-          size={24}
-        />
-      </TouchableOpacity>
-    </View>
+        </View>
+      </>
+    ) : (
+      <View />
+    )}
     <TouchableOpacity
       style={[styles.glassCircle, reduceTransparency && styles.solidControl]}
       activeOpacity={0.8}
@@ -116,8 +129,8 @@ export const TopCameraToolbar = ({
 const styles = StyleSheet.create({
   topTools: {
     position: 'absolute',
-    left: 18,
-    right: 18,
+    left: 0,
+    right: 0,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',

@@ -18,10 +18,14 @@ export const ProfessionalQuickAdjustPanel = ({
   minISO,
   maxISO,
   shutterDuration,
+  minShutterDuration,
+  maxShutterDuration,
   shutterOptions,
   focusPosition,
   onPreviewISO,
   onCommitISO,
+  onPreviewShutter,
+  onCommitShutter,
   onSelectShutter,
   onPreviewFocus,
   onCommitFocus,
@@ -32,99 +36,177 @@ export const ProfessionalQuickAdjustPanel = ({
   minISO: number
   maxISO: number
   shutterDuration: number
+  minShutterDuration: number
+  maxShutterDuration: number
   shutterOptions: number[]
   focusPosition: number
   onPreviewISO: (value: number) => void
   onCommitISO: (value: number) => void
+  onPreviewShutter: (value: number) => void
+  onCommitShutter: (value: number) => void
   onSelectShutter: (value: number) => void
   onPreviewFocus: (value: number) => void
   onCommitFocus: (value: number) => void
-}) => (
-  <GlassPanel style={[styles.panel, { bottom }]}>
-    {mode === 'iso' ? (
-      <View style={styles.section}>
-        <View style={styles.header}>
-          <Text style={styles.title}>ISO</Text>
-          <Text style={styles.value}>{Math.round(iso)}</Text>
-        </View>
-        <Slider
-          style={styles.slider}
-          value={iso}
-          minimumValue={minISO}
-          maximumValue={maxISO}
-          step={1}
-          minimumTrackTintColor="#58e8ff"
-          maximumTrackTintColor="rgba(255,255,255,0.2)"
-          thumbTintColor="#fff"
-          onValueChange={onPreviewISO}
-          onSlidingComplete={onCommitISO}
-        />
-      </View>
-    ) : null}
+}) => {
+  const shutterSliderValue = getShutterSliderValue(
+    shutterDuration,
+    minShutterDuration,
+    maxShutterDuration,
+  )
+  const activeShutterOption = shutterOptions.find(
+    option =>
+      Math.abs(option - shutterDuration) <= Math.max(option * 0.06, 1 / 1500),
+  )
 
-    {mode === 'shutter' ? (
-      <View style={styles.section}>
-        <View style={styles.header}>
-          <Text style={styles.title}>快门</Text>
-          <Text style={styles.value}>
-            {formatShutterDuration(shutterDuration)}
-          </Text>
-        </View>
-        <View style={styles.chipWrap}>
-          {shutterOptions.map(option => {
-            const active = Math.abs(option - shutterDuration) < 0.0001
-            return (
-              <TouchableOpacity
-                key={option}
-                style={[styles.chip, active && styles.chipActive]}
-                activeOpacity={0.82}
-                onPress={() => onSelectShutter(option)}
-              >
-                <Text
-                  style={[styles.chipText, active && styles.chipTextActive]}
-                >
-                  {formatShutterDuration(option)}
-                </Text>
-              </TouchableOpacity>
-            )
-          })}
-        </View>
-      </View>
-    ) : null}
-
-    {mode === 'focus' ? (
-      <View style={styles.section}>
-        <View style={styles.header}>
-          <View style={styles.titleGroup}>
-            <MaterialIcons
-              name="center-focus-strong"
-              color="rgba(255,255,255,0.9)"
-              size={18}
-            />
-            <Text style={styles.title}>手动对焦</Text>
+  return (
+    <GlassPanel style={[styles.panel, { bottom }]}>
+      {mode === 'iso' ? (
+        <View style={styles.section}>
+          <View style={styles.header}>
+            <Text style={styles.title}>ISO</Text>
+            <Text style={styles.value}>{Math.round(iso)}</Text>
           </View>
-          <Text style={styles.value}>{formatFocusPercent(focusPosition)}</Text>
+          <Slider
+            style={styles.slider}
+            value={iso}
+            minimumValue={minISO}
+            maximumValue={maxISO}
+            step={1}
+            minimumTrackTintColor="#58e8ff"
+            maximumTrackTintColor="rgba(255,255,255,0.2)"
+            thumbTintColor="#fff"
+            onValueChange={onPreviewISO}
+            onSlidingComplete={onCommitISO}
+          />
         </View>
-        <View style={styles.focusLabels}>
-          <Text style={styles.focusHint}>最近</Text>
-          <Text style={styles.focusHint}>远处</Text>
+      ) : null}
+
+      {mode === 'shutter' ? (
+        <View style={styles.section}>
+          <View style={styles.header}>
+            <Text style={styles.title}>快门</Text>
+            <Text style={styles.value}>
+              {formatShutterDuration(shutterDuration)}
+            </Text>
+          </View>
+          <Slider
+            style={styles.slider}
+            value={shutterSliderValue}
+            minimumValue={0}
+            maximumValue={1}
+            minimumTrackTintColor="#58e8ff"
+            maximumTrackTintColor="rgba(255,255,255,0.2)"
+            thumbTintColor="#fff"
+            onValueChange={value =>
+              onPreviewShutter(
+                getShutterDurationFromSlider(
+                  value,
+                  minShutterDuration,
+                  maxShutterDuration,
+                ),
+              )
+            }
+            onSlidingComplete={value =>
+              onCommitShutter(
+                getShutterDurationFromSlider(
+                  value,
+                  minShutterDuration,
+                  maxShutterDuration,
+                ),
+              )
+            }
+          />
+          <View style={styles.chipWrap}>
+            {shutterOptions.map(option => {
+              const active = activeShutterOption === option
+              return (
+                <TouchableOpacity
+                  key={option}
+                  style={[styles.chip, active && styles.chipActive]}
+                  activeOpacity={0.82}
+                  onPress={() => onSelectShutter(option)}
+                >
+                  <Text
+                    style={[styles.chipText, active && styles.chipTextActive]}
+                  >
+                    {formatShutterDuration(option)}
+                  </Text>
+                </TouchableOpacity>
+              )
+            })}
+          </View>
         </View>
-        <Slider
-          style={styles.slider}
-          value={focusPosition}
-          minimumValue={0}
-          maximumValue={1}
-          step={0.01}
-          minimumTrackTintColor="#58e8ff"
-          maximumTrackTintColor="rgba(255,255,255,0.2)"
-          thumbTintColor="#fff"
-          onValueChange={onPreviewFocus}
-          onSlidingComplete={onCommitFocus}
-        />
-      </View>
-    ) : null}
-  </GlassPanel>
-)
+      ) : null}
+
+      {mode === 'focus' ? (
+        <View style={styles.section}>
+          <View style={styles.header}>
+            <View style={styles.titleGroup}>
+              <MaterialIcons
+                name="center-focus-strong"
+                color="rgba(255,255,255,0.9)"
+                size={18}
+              />
+              <Text style={styles.title}>手动对焦</Text>
+            </View>
+            <Text style={styles.value}>
+              {formatFocusPercent(focusPosition)}
+            </Text>
+          </View>
+          <View style={styles.focusLabels}>
+            <Text style={styles.focusHint}>最近</Text>
+            <Text style={styles.focusHint}>远处</Text>
+          </View>
+          <Slider
+            style={styles.slider}
+            value={focusPosition}
+            minimumValue={0}
+            maximumValue={1}
+            step={0.01}
+            minimumTrackTintColor="#58e8ff"
+            maximumTrackTintColor="rgba(255,255,255,0.2)"
+            thumbTintColor="#fff"
+            onValueChange={onPreviewFocus}
+            onSlidingComplete={onCommitFocus}
+          />
+        </View>
+      ) : null}
+    </GlassPanel>
+  )
+}
+
+const getShutterSliderValue = (
+  duration: number,
+  minDuration: number,
+  maxDuration: number,
+) => {
+  const safeMin = Math.max(minDuration, 0.0001)
+  const safeMax = Math.max(maxDuration, safeMin)
+  const safeDuration = Math.min(Math.max(duration, safeMin), safeMax)
+
+  if (Math.abs(safeMax - safeMin) < 0.000001) return 0
+
+  return (
+    (Math.log(safeDuration) - Math.log(safeMin)) /
+    (Math.log(safeMax) - Math.log(safeMin))
+  )
+}
+
+const getShutterDurationFromSlider = (
+  value: number,
+  minDuration: number,
+  maxDuration: number,
+) => {
+  const safeMin = Math.max(minDuration, 0.0001)
+  const safeMax = Math.max(maxDuration, safeMin)
+  const clampedValue = Math.min(Math.max(value, 0), 1)
+
+  if (Math.abs(safeMax - safeMin) < 0.000001) return safeMin
+
+  return Math.exp(
+    Math.log(safeMin) + (Math.log(safeMax) - Math.log(safeMin)) * clampedValue,
+  )
+}
 
 const styles = StyleSheet.create({
   panel: {

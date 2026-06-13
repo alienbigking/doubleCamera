@@ -15,11 +15,13 @@ export const BottomCameraToolbar = ({
   mode,
   layoutLabel,
   videoStatusText,
+  expanded,
   recording,
   recordingSeconds,
   captureBusy,
   recordingBusy,
   shutterScale,
+  horizontalInset,
   reduceTransparency,
   onSetPhotoMode,
   onSetVideoMode,
@@ -32,11 +34,13 @@ export const BottomCameraToolbar = ({
   mode: CaptureMode
   layoutLabel: string
   videoStatusText?: string | null
+  expanded: boolean
   recording: boolean
   recordingSeconds: number
   captureBusy: boolean
   recordingBusy: boolean
   shutterScale: Animated.Value
+  horizontalInset: number
   reduceTransparency: boolean
   onSetPhotoMode: () => void
   onSetVideoMode: () => void
@@ -47,76 +51,97 @@ export const BottomCameraToolbar = ({
   onToggleQuickPanel: () => void
 }) => (
   <SafeAreaView pointerEvents="box-none" style={styles.bottomSafe}>
-    <View pointerEvents="box-none" style={styles.bottomArea}>
-      <View pointerEvents="box-none" style={styles.controlRow}>
-        <View style={styles.controlGroup}>
-          {!recording && mode === 'video' && videoStatusText ? (
-            <Text style={styles.videoStatus}>{videoStatusText}</Text>
-          ) : null}
-          <View style={styles.controlRowInline}>
+    <View
+      pointerEvents="box-none"
+      style={[styles.bottomArea, { paddingHorizontal: horizontalInset }]}
+    >
+      {expanded ? (
+        <View pointerEvents="box-none" style={styles.controlRow}>
+          <View style={styles.controlGroup}>
+            {!recording && mode === 'video' && videoStatusText ? (
+              <Text style={styles.videoStatus}>{videoStatusText}</Text>
+            ) : null}
             <View
-              style={[styles.controlGridSlot, styles.controlGridSlotDouble]}
-            />
-            <View style={styles.controlGridSlot}>
-              <TouchableOpacity
+              style={[
+                styles.controlRowInline,
+                recording && styles.controlRowInlineRecording,
+              ]}
+            >
+              <View
                 style={[
-                  styles.controlChip,
-                  reduceTransparency && styles.solidControl,
+                  styles.controlGridSlot,
+                  !recording && styles.controlGridSlotAuto,
                 ]}
-                activeOpacity={0.8}
-                onPress={onToggleLayout}
               >
-                <MaterialIcons
-                  name="picture-in-picture-alt"
-                  color="rgba(255,255,255,0.86)"
-                  size={17}
-                />
-                <Text style={styles.chipText}>{layoutLabel}</Text>
-              </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.controlChip,
+                    reduceTransparency && styles.solidControl,
+                  ]}
+                  activeOpacity={0.8}
+                  onPress={onToggleLayout}
+                >
+                  <MaterialIcons
+                    name="picture-in-picture-alt"
+                    color="rgba(255,255,255,0.86)"
+                    size={17}
+                  />
+                  <Text style={styles.chipText}>{layoutLabel}</Text>
+                </TouchableOpacity>
+              </View>
+              <View
+                style={[
+                  styles.controlGridSlot,
+                  styles.timerGridSlot,
+                  !recording && styles.timerGridSlotHidden,
+                ]}
+              >
+                {recording ? (
+                  <Text style={styles.timer}>
+                    {formatDuration(recordingSeconds)}
+                  </Text>
+                ) : null}
+              </View>
             </View>
-            <View style={[styles.controlGridSlot, styles.timerGridSlot]}>
-              {recording ? (
-                <Text style={styles.timer}>
-                  {formatDuration(recordingSeconds)}
-                </Text>
-              ) : null}
-            </View>
-            <View style={styles.controlGridSlot} />
           </View>
         </View>
-      </View>
+      ) : null}
       <View pointerEvents="box-none" style={styles.shutterRow}>
-        <View style={styles.shutterGridSlot}>
-          <TouchableOpacity
-            style={[
-              styles.sideButton,
-              reduceTransparency && styles.solidControl,
-            ]}
-            activeOpacity={0.8}
-            onPress={onOpenGallery}
-          >
-            <MaterialIcons
-              name="photo-library"
-              color="rgba(255,255,255,0.9)"
-              size={26}
-            />
-          </TouchableOpacity>
+        <View style={[styles.shutterGridSlot, styles.shutterGridSlotStart]}>
+          {expanded ? (
+            <TouchableOpacity
+              style={[
+                styles.sideButton,
+                reduceTransparency && styles.solidControl,
+              ]}
+              activeOpacity={0.8}
+              onPress={onOpenGallery}
+            >
+              <MaterialIcons
+                name="photo-library"
+                color="rgba(255,255,255,0.9)"
+                size={26}
+              />
+            </TouchableOpacity>
+          ) : null}
         </View>
         <View style={styles.shutterGridSlot}>
-          <TouchableOpacity
-            style={[
-              styles.sideButton,
-              reduceTransparency && styles.solidControl,
-            ]}
-            activeOpacity={0.8}
-            onPress={onFlipPrimaryCamera}
-          >
-            <MaterialIcons
-              name="flip-camera-ios"
-              color="rgba(255,255,255,0.9)"
-              size={27}
-            />
-          </TouchableOpacity>
+          {expanded ? (
+            <TouchableOpacity
+              style={[
+                styles.sideButton,
+                reduceTransparency && styles.solidControl,
+              ]}
+              activeOpacity={0.8}
+              onPress={onFlipPrimaryCamera}
+            >
+              <MaterialIcons
+                name="flip-camera-ios"
+                color="rgba(255,255,255,0.9)"
+                size={27}
+              />
+            </TouchableOpacity>
+          ) : null}
         </View>
         <View style={styles.shutterGridSlot}>
           <TouchableOpacity
@@ -139,22 +164,24 @@ export const BottomCameraToolbar = ({
           </TouchableOpacity>
         </View>
         <View style={styles.shutterGridSlot}>
-          <TouchableOpacity
-            style={[
-              styles.sideButton,
-              reduceTransparency && styles.solidControl,
-            ]}
-            activeOpacity={0.8}
-            onPress={mode === 'video' ? onSetPhotoMode : onSetVideoMode}
-          >
-            <MaterialIcons
-              name={mode === 'video' ? 'photo-camera' : 'videocam'}
-              color="rgba(255,255,255,0.9)"
-              size={29}
-            />
-          </TouchableOpacity>
+          {expanded ? (
+            <TouchableOpacity
+              style={[
+                styles.sideButton,
+                reduceTransparency && styles.solidControl,
+              ]}
+              activeOpacity={0.8}
+              onPress={mode === 'video' ? onSetPhotoMode : onSetVideoMode}
+            >
+              <MaterialIcons
+                name={mode === 'video' ? 'photo-camera' : 'videocam'}
+                color="rgba(255,255,255,0.9)"
+                size={29}
+              />
+            </TouchableOpacity>
+          ) : null}
         </View>
-        <View style={styles.shutterGridSlot}>
+        <View style={[styles.shutterGridSlot, styles.shutterGridSlotEnd]}>
           <TouchableOpacity
             style={[
               styles.sideButton,
@@ -207,6 +234,10 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  controlRowInlineRecording: {
+    justifyContent: 'space-between',
   },
   controlGridSlot: {
     flex: 1,
@@ -215,11 +246,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  controlGridSlotDouble: {
-    flex: 2,
+  controlGridSlotAuto: {
+    flex: 0,
+    flexBasis: 'auto',
   },
   timerGridSlot: {
-    width: '100%',
+    alignItems: 'flex-end',
+  },
+  timerGridSlotHidden: {
+    display: 'none',
   },
   controlChip: {
     flexDirection: 'row',
@@ -261,6 +296,12 @@ const styles = StyleSheet.create({
     flexBasis: 0,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  shutterGridSlotStart: {
+    alignItems: 'flex-start',
+  },
+  shutterGridSlotEnd: {
+    alignItems: 'flex-end',
   },
   sideButton: {
     width: 58,
