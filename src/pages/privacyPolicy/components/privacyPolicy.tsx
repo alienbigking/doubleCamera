@@ -2,10 +2,19 @@ import React from 'react'
 import { StyleSheet, Text, View, ScrollView } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useSettingsStore } from '@/pages/settings/stores'
+import { useTranslation } from 'react-i18next'
 
 const PrivacyPolicy = () => {
   const insets = useSafeAreaInsets()
   const appBackground = useSettingsStore(s => s.appBackground)
+  const { t } = useTranslation()
+
+  const renderBulletLines = (text: string) =>
+    text.split('\n').map(line => (
+      <Text key={line} style={styles.sectionText}>
+        {line}
+      </Text>
+    ))
 
   return (
     <View
@@ -19,74 +28,74 @@ const PrivacyPolicy = () => {
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
       >
-        <Text style={styles.title}>隐私政策</Text>
-        <Text style={styles.updateDate}>更新日期：2024年5月</Text>
+        <Text style={styles.title}>{t('privacyPolicy.title')}</Text>
+        <Text style={styles.updateDate}>{t('privacyPolicy.updatedAt')}</Text>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>1. 信息收集</Text>
-          <Text style={styles.sectionText}>我们可能会收集以下类型的信息：</Text>
-          <Text style={styles.sectionText}>
-            • 账户信息：用户名、昵称、头像等
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.collectionTitle')}
           </Text>
           <Text style={styles.sectionText}>
-            • 设备信息：设备型号、操作系统版本等
+            {t('privacyPolicy.sections.collectionIntro')}
+          </Text>
+          {renderBulletLines(t('privacyPolicy.sections.collectionItems'))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.usageTitle')}
           </Text>
           <Text style={styles.sectionText}>
-            • 使用数据：应用使用情况、偏好设置等
+            {t('privacyPolicy.sections.usageIntro')}
+          </Text>
+          {renderBulletLines(t('privacyPolicy.sections.usageItems'))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.sharingTitle')}
+          </Text>
+          <Text style={styles.sectionText}>
+            {t('privacyPolicy.sections.sharingIntro')}
+          </Text>
+          {renderBulletLines(t('privacyPolicy.sections.sharingItems'))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.securityTitle')}
+          </Text>
+          <Text style={styles.sectionText}>
+            {t('privacyPolicy.sections.securityIntro')}
+          </Text>
+          {renderBulletLines(t('privacyPolicy.sections.securityItems'))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.rightsTitle')}
+          </Text>
+          <Text style={styles.sectionText}>
+            {t('privacyPolicy.sections.rightsIntro')}
+          </Text>
+          {renderBulletLines(t('privacyPolicy.sections.rightsItems'))}
+        </View>
+
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.contactTitle')}
+          </Text>
+          <Text style={styles.sectionText}>
+            {t('privacyPolicy.sections.contactText')}
           </Text>
         </View>
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>2. 信息使用</Text>
-          <Text style={styles.sectionText}>
-            我们使用收集的信息用于以下目的：
+          <Text style={styles.sectionTitle}>
+            {t('privacyPolicy.sections.updateTitle')}
           </Text>
-          <Text style={styles.sectionText}>• 提供和维护服务</Text>
-          <Text style={styles.sectionText}>• 改进用户体验</Text>
-          <Text style={styles.sectionText}>• 发送重要通知</Text>
-          <Text style={styles.sectionText}>• 防止欺诈和滥用</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>3. 信息共享</Text>
           <Text style={styles.sectionText}>
-            除以下情况外，我们不会与第三方共享您的个人信息：
-          </Text>
-          <Text style={styles.sectionText}>• 获得您的明确同意</Text>
-          <Text style={styles.sectionText}>• 法律法规要求</Text>
-          <Text style={styles.sectionText}>• 保护我们的合法权益</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>4. 信息安全</Text>
-          <Text style={styles.sectionText}>
-            我们采取合理的安全措施来保护您的个人信息，包括：
-          </Text>
-          <Text style={styles.sectionText}>• 数据加密传输</Text>
-          <Text style={styles.sectionText}>• 访问权限控制</Text>
-          <Text style={styles.sectionText}>• 定期安全审计</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>5. 您的权利</Text>
-          <Text style={styles.sectionText}>您对个人信息享有以下权利：</Text>
-          <Text style={styles.sectionText}>• 访问您的个人信息</Text>
-          <Text style={styles.sectionText}>• 更正不准确的信息</Text>
-          <Text style={styles.sectionText}>• 删除您的账户</Text>
-          <Text style={styles.sectionText}>• 撤回同意</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>6. 联系我们</Text>
-          <Text style={styles.sectionText}>
-            如对本隐私政策有任何疑问，请通过应用内的帮助与反馈功能联系我们。
-          </Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>7. 政策更新</Text>
-          <Text style={styles.sectionText}>
-            我们可能会不时更新本隐私政策。更新后的政策将在应用内发布，请您定期查看。
+            {t('privacyPolicy.sections.updateText')}
           </Text>
         </View>
       </ScrollView>

@@ -1,24 +1,31 @@
 import React, { useState } from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { useTranslation } from 'react-i18next'
 import type { WhiteBalancePreset } from './types'
 
 export type WhiteBalanceOption = {
   id: WhiteBalancePreset
-  label: string
   temperature?: number
   tint?: number
 }
 
 export const whiteBalanceOptions: WhiteBalanceOption[] = [
-  { id: 'auto', label: '自动' },
-  { id: 'cool', label: '冷色', temperature: 4200, tint: 0 },
-  { id: 'natural', label: '自然', temperature: 5500, tint: 0 },
-  { id: 'warm', label: '暖色', temperature: 7000, tint: 0 },
+  { id: 'auto' },
+  { id: 'cool', temperature: 4200, tint: 0 },
+  { id: 'natural', temperature: 5500, tint: 0 },
+  { id: 'warm', temperature: 7000, tint: 0 },
 ]
 
-const getWhiteBalanceLabel = (preset: WhiteBalancePreset) =>
-  whiteBalanceOptions.find(option => option.id === preset)?.label || '自动'
+export const getWhiteBalanceLabel = (
+  preset: WhiteBalancePreset,
+  t: (key: string) => string,
+) => {
+  if (preset === 'cool') return t('options.cool')
+  if (preset === 'natural') return t('options.natural')
+  if (preset === 'warm') return t('options.warm')
+  return t('common.auto')
+}
 
 // 白平衡控制弹框组件：分别调整后置和前置摄像头的色温预设。
 export const WhiteBalanceControlPanel = ({
@@ -42,6 +49,7 @@ export const WhiteBalanceControlPanel = ({
   onChangeFrontPreset: (preset: WhiteBalancePreset) => void
   onClose: () => void
 }) => {
+  const { t } = useTranslation()
   const [openSide, setOpenSide] = useState<'rear' | 'front' | null>(null)
 
   return (
@@ -53,7 +61,7 @@ export const WhiteBalanceControlPanel = ({
             color="rgba(255,255,255,0.9)"
             size={28}
           />
-          <Text style={styles.title}>白平衡</Text>
+          <Text style={styles.title}>{t('quickSettings.whiteBalance')}</Text>
         </View>
         <TouchableOpacity
           style={styles.closeButton}
@@ -70,6 +78,7 @@ export const WhiteBalanceControlPanel = ({
       <WhiteBalanceRow
         label={primaryLabel}
         preset={rearPreset}
+        t={t}
         supported={rearSupported}
         open={openSide === 'rear'}
         onToggleOpen={() => setOpenSide(openSide === 'rear' ? null : 'rear')}
@@ -81,6 +90,7 @@ export const WhiteBalanceControlPanel = ({
       <WhiteBalanceRow
         label={secondaryLabel}
         preset={frontPreset}
+        t={t}
         supported={frontSupported}
         open={openSide === 'front'}
         onToggleOpen={() => setOpenSide(openSide === 'front' ? null : 'front')}
@@ -96,6 +106,7 @@ export const WhiteBalanceControlPanel = ({
 const WhiteBalanceRow = ({
   label,
   preset,
+  t,
   supported,
   open,
   onToggleOpen,
@@ -103,6 +114,7 @@ const WhiteBalanceRow = ({
 }: {
   label: string
   preset: WhiteBalancePreset
+  t: (key: string) => string
   supported: boolean
   open: boolean
   onToggleOpen: () => void
@@ -122,7 +134,7 @@ const WhiteBalanceRow = ({
       disabled={!supported}
       onPress={onToggleOpen}
     >
-      <Text style={styles.selectText}>{getWhiteBalanceLabel(preset)}</Text>
+      <Text style={styles.selectText}>{getWhiteBalanceLabel(preset, t)}</Text>
       <MaterialIcons
         name={open ? 'keyboard-arrow-up' : 'keyboard-arrow-down'}
         color="rgba(255,255,255,0.54)"
@@ -146,7 +158,9 @@ const WhiteBalanceRow = ({
             activeOpacity={0.78}
             onPress={() => onSelect(option.id)}
           >
-            <Text style={styles.optionText}>{option.label}</Text>
+            <Text style={styles.optionText}>
+              {getWhiteBalanceLabel(option.id, t)}
+            </Text>
             {preset === option.id && (
               <MaterialIcons
                 name="check"

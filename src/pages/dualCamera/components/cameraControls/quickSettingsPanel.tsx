@@ -1,5 +1,6 @@
 import React from 'react'
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native'
+import { useTranslation } from 'react-i18next'
 import { GlassPanel, SettingLine } from '../controls'
 import {
   dualCameraFilterRenderQualityPresets,
@@ -10,12 +11,10 @@ import type {
   PhotoSaveMode,
   WhiteBalancePreset,
 } from './types'
-import { whiteBalanceOptions } from './whiteBalanceControlPanel'
+import { getWhiteBalanceLabel } from './whiteBalanceControlPanel'
 
 const formatExposure = (value: number) =>
   `${value >= 0 ? '+' : ''}${value.toFixed(1)}`
-const formatWhiteBalance = (preset: WhiteBalancePreset) =>
-  whiteBalanceOptions.find(option => option.id === preset)?.label || '自动'
 
 // 快捷设置弹层组件：承载宽高比、照片保存方式等拍摄快捷配置。
 export const QuickSettingsPanel = ({
@@ -54,47 +53,33 @@ export const QuickSettingsPanel = ({
   onToggleFocusLock: () => void
   onOpenExposurePanel: () => void
   onOpenWhiteBalancePanel: () => void
-}) => (
-  <GlassPanel style={styles.quickPanel}>
-    <Text style={styles.panelTitle}>快捷设置</Text>
-    <Text style={styles.settingLabel}>宽高比</Text>
-    <View style={styles.ratioGroup}>
-      {ratios.map(item => (
-        <TouchableOpacity
-          key={item}
-          style={[styles.ratioItem, ratio === item && styles.ratioItemActive]}
-          onPress={() => onChangeRatio(item)}
-        >
-          <Text
-            style={[styles.ratioText, ratio === item && styles.ratioTextActive]}
-          >
-            {item}
-          </Text>
-        </TouchableOpacity>
-      ))}
-    </View>
-    <SettingLine
-      label="拍摄倒计时"
-      value={captureTimerMode === 'off' ? '关闭' : captureTimerMode}
-      onPress={onToggleCaptureTimer}
-    />
-    <View style={styles.saveModeGroup}>
-      <Text style={styles.settingLabel}>照片质量</Text>
-      <View style={styles.saveModeButtons}>
-        {dualCameraFilterRenderQualityPresets.map(item => (
+}) => {
+  const { t } = useTranslation()
+  const localizedRatios = ratios.map(item => ({
+    value: item,
+    label: item === '全屏' ? t('options.full') : item,
+  }))
+  const formatWhiteBalance = (preset: WhiteBalancePreset) =>
+    getWhiteBalanceLabel(preset, t)
+
+  return (
+    <GlassPanel style={styles.quickPanel}>
+      <Text style={styles.panelTitle}>{t('quickSettings.title')}</Text>
+      <Text style={styles.settingLabel}>{t('quickSettings.ratio')}</Text>
+      <View style={styles.ratioGroup}>
+        {localizedRatios.map(item => (
           <TouchableOpacity
-            key={item.id}
+            key={item.value}
             style={[
-              styles.saveModeButton,
-              filterRenderQuality === item.id && styles.saveModeButtonActive,
+              styles.ratioItem,
+              ratio === item.value && styles.ratioItemActive,
             ]}
-            activeOpacity={0.8}
-            onPress={() => onChangeFilterRenderQuality(item.id)}
+            onPress={() => onChangeRatio(item.value)}
           >
             <Text
               style={[
-                styles.saveModeText,
-                filterRenderQuality === item.id && styles.saveModeTextActive,
+                styles.ratioText,
+                ratio === item.value && styles.ratioTextActive,
               ]}
             >
               {item.label}
@@ -102,86 +87,124 @@ export const QuickSettingsPanel = ({
           </TouchableOpacity>
         ))}
       </View>
-    </View>
-    <View style={styles.saveModeGroup}>
-      <Text style={styles.settingLabel}>照片保存</Text>
-      <View style={styles.saveModeButtons}>
-        <TouchableOpacity
-          style={[
-            styles.saveModeButton,
-            photoSaveMode === 'combined' && styles.saveModeButtonActive,
-          ]}
-          activeOpacity={0.8}
-          onPress={() => onChangePhotoSaveMode('combined')}
-        >
-          <Text
-            style={[
-              styles.saveModeText,
-              photoSaveMode === 'combined' && styles.saveModeTextActive,
-            ]}
-          >
-            合成一张
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.saveModeButton,
-            photoSaveMode === 'separate' && styles.saveModeButtonActive,
-          ]}
-          activeOpacity={0.8}
-          onPress={() => onChangePhotoSaveMode('separate')}
-        >
-          <Text
-            style={[
-              styles.saveModeText,
-              photoSaveMode === 'separate' && styles.saveModeTextActive,
-            ]}
-          >
-            分别保存
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[
-            styles.saveModeButton,
-            photoSaveMode === 'combinedAndSeparate' &&
-              styles.saveModeButtonActive,
-          ]}
-          activeOpacity={0.8}
-          onPress={() => onChangePhotoSaveMode('combinedAndSeparate')}
-        >
-          <Text
-            style={[
-              styles.saveModeText,
-              photoSaveMode === 'combinedAndSeparate' &&
-                styles.saveModeTextActive,
-            ]}
-          >
-            合成+分别
-          </Text>
-        </TouchableOpacity>
+      <SettingLine
+        label={t('quickSettings.captureTimer')}
+        value={captureTimerMode === 'off' ? t('options.off') : captureTimerMode}
+        onPress={onToggleCaptureTimer}
+      />
+      <View style={styles.saveModeGroup}>
+        <Text style={styles.settingLabel}>
+          {t('quickSettings.photoQuality')}
+        </Text>
+        <View style={styles.saveModeButtons}>
+          {dualCameraFilterRenderQualityPresets.map(item => (
+            <TouchableOpacity
+              key={item.id}
+              style={[
+                styles.saveModeButton,
+                filterRenderQuality === item.id && styles.saveModeButtonActive,
+              ]}
+              activeOpacity={0.8}
+              onPress={() => onChangeFilterRenderQuality(item.id)}
+            >
+              <Text
+                style={[
+                  styles.saveModeText,
+                  filterRenderQuality === item.id && styles.saveModeTextActive,
+                ]}
+              >
+                {item.id === 'standard' ? t('options.standard') : item.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
-    </View>
-    <SettingLine
-      label="对焦锁定"
-      value={focusLocked ? '已锁定' : '未锁定'}
-      onPress={onToggleFocusLock}
-    />
-    <SettingLine
-      label="曝光"
-      value={`后 ${formatExposure(rearExposure)} / 前 ${formatExposure(
-        frontExposure,
-      )}`}
-      onPress={onOpenExposurePanel}
-    />
-    <SettingLine
-      label="白平衡"
-      value={`后 ${formatWhiteBalance(
-        rearWhiteBalancePreset,
-      )} / 前 ${formatWhiteBalance(frontWhiteBalancePreset)}`}
-      onPress={onOpenWhiteBalancePanel}
-    />
-  </GlassPanel>
-)
+      <View style={styles.saveModeGroup}>
+        <Text style={styles.settingLabel}>{t('quickSettings.photoSave')}</Text>
+        <View style={styles.saveModeButtons}>
+          <TouchableOpacity
+            style={[
+              styles.saveModeButton,
+              photoSaveMode === 'combined' && styles.saveModeButtonActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={() => onChangePhotoSaveMode('combined')}
+          >
+            <Text
+              style={[
+                styles.saveModeText,
+                photoSaveMode === 'combined' && styles.saveModeTextActive,
+              ]}
+            >
+              {t('options.combined')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.saveModeButton,
+              photoSaveMode === 'separate' && styles.saveModeButtonActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={() => onChangePhotoSaveMode('separate')}
+          >
+            <Text
+              style={[
+                styles.saveModeText,
+                photoSaveMode === 'separate' && styles.saveModeTextActive,
+              ]}
+            >
+              {t('options.separate')}
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[
+              styles.saveModeButton,
+              photoSaveMode === 'combinedAndSeparate' &&
+                styles.saveModeButtonActive,
+            ]}
+            activeOpacity={0.8}
+            onPress={() => onChangePhotoSaveMode('combinedAndSeparate')}
+          >
+            <Text
+              style={[
+                styles.saveModeText,
+                photoSaveMode === 'combinedAndSeparate' &&
+                  styles.saveModeTextActive,
+              ]}
+            >
+              {t('options.combinedAndSeparate')}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+      <SettingLine
+        label={t('quickSettings.focusLock')}
+        value={
+          focusLocked
+            ? t('quickSettings.focusLocked')
+            : t('quickSettings.focusUnlocked')
+        }
+        onPress={onToggleFocusLock}
+      />
+      <SettingLine
+        label={t('quickSettings.exposure')}
+        value={`${t('quickSettings.rearShort')} ${formatExposure(
+          rearExposure,
+        )} / ${t('quickSettings.frontShort')} ${formatExposure(frontExposure)}`}
+        onPress={onOpenExposurePanel}
+      />
+      <SettingLine
+        label={t('quickSettings.whiteBalance')}
+        value={`${t('quickSettings.rearShort')} ${formatWhiteBalance(
+          rearWhiteBalancePreset,
+        )} / ${t('quickSettings.frontShort')} ${formatWhiteBalance(
+          frontWhiteBalancePreset,
+        )}`}
+        onPress={onOpenWhiteBalancePanel}
+      />
+    </GlassPanel>
+  )
+}
 
 const styles = StyleSheet.create({
   quickPanel: { right: 18, bottom: 128, width: 260 },

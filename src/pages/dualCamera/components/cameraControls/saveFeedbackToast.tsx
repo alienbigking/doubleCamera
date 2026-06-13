@@ -1,6 +1,7 @@
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { useTranslation } from 'react-i18next'
 import type { SaveFeedback } from './types'
 
 // 保存反馈组件：拍照保存过程中展示“保存中/已保存”的轻提示。
@@ -11,6 +12,7 @@ export const SaveFeedbackToast = ({
   feedback: SaveFeedback
   bottom: number
 }) => {
+  const { t } = useTranslation()
   if (!feedback) return null
 
   const isSaved = feedback === 'saved'
@@ -34,12 +36,12 @@ export const SaveFeedbackToast = ({
       />
       <Text style={styles.saveFeedbackText}>
         {isSaved
-          ? '已保存'
+          ? t('saveFeedback.saved')
           : isFailed
-          ? '保存失败，请重试'
+          ? t('saveFeedback.failed')
           : isFallback
-          ? '合成失败，已保存原始视频'
-          : '双摄数据处理量大，保存需要时间，请稍等'}
+          ? t('saveFeedback.fallback')
+          : t('saveFeedback.saving')}
       </Text>
     </View>
   )

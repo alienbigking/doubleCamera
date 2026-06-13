@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Animated,
   Dimensions,
+  Linking,
   PanResponder,
   PermissionsAndroid,
   Platform,
   Pressable,
+  Share,
   StyleSheet,
   Text,
   type GestureResponderEvent,
@@ -50,9 +52,11 @@ import {
   QuickSettingsPanel,
   SaveFeedbackToast,
   TopMenuAiEnhancePanel,
+  TopMenuAboutPanel,
   TopMenuCaptureAnalyticsPanel,
   TopMenuDisplayPanel,
   TopMenuFilterPanel,
+  TopMenuLanguagePanel,
   TopMenuProfessionalPanel,
   TopMenuSettingsPanel,
   TopCameraToolbar,
@@ -115,6 +119,18 @@ import {
   type CaptureAnalyticsAction,
   type CaptureAnalyticsStats,
 } from './captureAnalytics'
+import {
+  changeLanguage,
+  supportedLanguages,
+  type SupportedLanguageCode,
+} from '@/i18n'
+import { useTranslation } from 'react-i18next'
+import { navigate } from '@/navigation/navigationService'
+import {
+  appConfig,
+  getFeedbackMailtoUrl,
+  getStoreUrl,
+} from '@/config/appConfig'
 
 type CameraSide = 'rear' | 'front'
 type PreviewStatus = 'loading' | 'ready' | 'denied' | 'unavailable' | 'error'
@@ -145,8 +161,8 @@ type SceneSignals = Record<
 const defaultLensOptions: LensOption[] = [
   {
     id: 'wide',
-    label: '主摄(1x)',
-    shortLabel: '主摄',
+    label: 'Wide(1x)',
+    shortLabel: 'Wide',
     zoomLabel: '1x',
     zoomValue: 1,
   },
@@ -191,6 +207,7 @@ const videoResolutionConfig: Record<
 const defaultProfessionalISO = 120
 const defaultProfessionalFocusPosition = 0.5
 const sceneSignalStaleMs = 1800
+const appVersionLabel = '1.0.0 (1)'
 const defaultExposureRange: ExposureRange = {
   min: -1,
   max: 1,
@@ -391,8 +408,8 @@ const getRearLensOptions = (device: CameraDevice): LensOption[] => {
     const zoomLabel = formatZoomLabel(zoomValue)
     options.push({
       id: 'ultra-wide',
-      label: `超广角(${zoomLabel}x)`,
-      shortLabel: '超广角',
+      label: `Ultra Wide(${zoomLabel}x)`,
+      shortLabel: 'Ultra Wide',
       zoomLabel: `${zoomLabel}x`,
       zoomValue,
     })
@@ -401,8 +418,8 @@ const getRearLensOptions = (device: CameraDevice): LensOption[] => {
   if (hasWide || options.length === 0) {
     options.push({
       id: 'wide',
-      label: '主摄(1x)',
-      shortLabel: '主摄',
+      label: 'Wide(1x)',
+      shortLabel: 'Wide',
       zoomLabel: '1x',
       zoomValue: 1,
     })
@@ -412,8 +429,8 @@ const getRearLensOptions = (device: CameraDevice): LensOption[] => {
     const zoomLabel = formatZoomLabel(telephotoZoom)
     options.push({
       id: 'telephoto',
-      label: `长焦(${zoomLabel}x)`,
-      shortLabel: '长焦',
+      label: `Telephoto(${zoomLabel}x)`,
+      shortLabel: 'Telephoto',
       zoomLabel: `${zoomLabel}x`,
       zoomValue: telephotoZoom,
     })
@@ -500,6 +517,7 @@ const requestGalleryReadPermission = async () => {
 }
 
 const DualCamera = () => {
+  const { i18n, t } = useTranslation()
   const insets = useSafeAreaInsets()
   const homeControlsHorizontalInset = 12
   const [mode, setMode] = useState<CaptureMode>('photo')
@@ -551,6 +569,8 @@ const DualCamera = () => {
   const [showTopBar, setShowTopBar] = useState(true)
   const [showBottomBar, setShowBottomBar] = useState(true)
   const [galleryOpen, setGalleryOpen] = useState(false)
+  const [selectedLanguage, setSelectedLanguage] =
+    useState<SupportedLanguageCode>('zh')
   const [recording, setRecording] = useState(false)
   const [recordingBusy, setRecordingBusy] = useState(false)
   const [recordingSeconds, setRecordingSeconds] = useState(0)
@@ -648,6 +668,37 @@ const DualCamera = () => {
   const videoWarmupPendingRef = useRef(false)
   const secondaryCamera: CameraSide =
     primaryCamera === 'rear' ? 'front' : 'rear'
+  const currentLanguageLabel =
+    supportedLanguages.find(item => item.code === selectedLanguage)
+      ?.nativeLabel || '简体中文'
+  const localizeLensOption = useCallback(
+    (option: LensOption): LensOption => {
+      const zoomSuffix = option.zoomLabel ? `(${option.zoomLabel})` : ''
+
+      if (option.id === 'ultra-wide') {
+        return {
+          ...option,
+          shortLabel: t('options.ultraWide'),
+          label: `${t('options.ultraWide')}${zoomSuffix}`,
+        }
+      }
+
+      if (option.id === 'telephoto') {
+        return {
+          ...option,
+          shortLabel: t('options.telephoto'),
+          label: `${t('options.telephoto')}${zoomSuffix}`,
+        }
+      }
+
+      return {
+        ...option,
+        shortLabel: t('options.wide'),
+        label: `${t('options.wide')}${zoomSuffix}`,
+      }
+    },
+    [t],
+  )
   const isPip = layout === 'pip'
   const shouldUseDualPhotoSession = mode === 'photo'
   const toneAdjustmentsEnabled = hasProfessionalToneAdjustments(toneAdjustments)
@@ -704,6 +755,13 @@ const DualCamera = () => {
       showControlStatusMessage('清空统计失败')
     }
   }, [])
+
+  useEffect(() => {
+    const current = (i18n.resolvedLanguage ||
+      i18n.language ||
+      'zh') as SupportedLanguageCode
+    setSelectedLanguage(current)
+  }, [i18n.language, i18n.resolvedLanguage])
 
   useEffect(() => {
     pipPositionRef.current = pipPosition
@@ -1086,7 +1144,9 @@ const DualCamera = () => {
           }),
         )
         const session = await VisionCamera.createCameraSession(true)
-        const rearLensOptions = getRearLensOptions(cameraPair.rear)
+        const rearLensOptions = getRearLensOptions(cameraPair.rear).map(
+          localizeLensOption,
+        )
         const initialLens =
           rearLensOptions.find(option => option.id === 'wide') ||
           rearLensOptions[0] ||
@@ -1282,7 +1342,7 @@ const DualCamera = () => {
     return () => clearInterval(timer)
   }, [recording])
 
-  const layoutLabel = layout === 'pip' ? '画中画' : '上下分屏'
+  const layoutLabel = layout === 'pip' ? t('options.pip') : t('options.split')
   const effectiveDualVideoComposeMode: DualVideoComposeMode =
     layout === 'split' ? 'split' : 'pip'
   const availableVideoFrameRates = (() => {
@@ -1320,8 +1380,14 @@ const DualCamera = () => {
     setVideoFrameRate(fallbackFrameRate)
   }, [availableVideoFrameRates, videoFrameRate])
 
-  const primaryLabel = primaryCamera === 'rear' ? '后置主画面' : '前置主画面'
-  const secondaryLabel = secondaryCamera === 'rear' ? '后置预览' : '前置预览'
+  const primaryLabel =
+    primaryCamera === 'rear'
+      ? t('common.rearPrimary')
+      : t('common.frontPrimary')
+  const secondaryLabel =
+    secondaryCamera === 'rear'
+      ? t('common.rearPreview')
+      : t('common.frontPreview')
   const previewStatusText = getCameraStatusText(previewStatus, previewError)
   const selectedLens =
     lensOptions.find(option => option.id === selectedLensId) ||
@@ -2052,6 +2118,66 @@ const DualCamera = () => {
   const resetToneAdjustments = () => {
     setToneAdjustments(defaultProfessionalToneAdjustments)
     showControlStatusMessage('调色参数已重置')
+  }
+
+  const rateApp = async () => {
+    const storeUrl = getStoreUrl('review')
+
+    if (!storeUrl) {
+      showControlStatusMessage(t('status.rateUnavailable'))
+      return
+    }
+
+    try {
+      await Linking.openURL(storeUrl)
+    } catch (error) {
+      console.warn('Open rate app link failed', error)
+      showControlStatusMessage(t('status.rateUnavailable'))
+    }
+  }
+
+  const shareApp = async () => {
+    try {
+      const storeUrl = getStoreUrl() || undefined
+      await Share.share({
+        message: `${appConfig.name} - DualCam`,
+        url: storeUrl,
+      })
+    } catch (error) {
+      console.warn('Share app failed', error)
+      showControlStatusMessage(t('status.shareFailed'))
+    }
+  }
+
+  const openFeedback = async () => {
+    try {
+      await Linking.openURL(getFeedbackMailtoUrl())
+    } catch (error) {
+      console.warn('Open feedback mail failed', error)
+      showControlStatusMessage(t('status.feedbackUnavailable'))
+    }
+  }
+
+  const openPrivacyTerms = () => {
+    setPanel(null)
+    navigate('PrivacyPolicy')
+  }
+
+  const selectAppLanguage = async (language: SupportedLanguageCode) => {
+    try {
+      await changeLanguage(language)
+      setSelectedLanguage(language)
+      showControlStatusMessage(
+        t('status.languageChanged', {
+          name:
+            supportedLanguages.find(item => item.code === language)
+              ?.nativeLabel || language,
+        }),
+      )
+    } catch (error) {
+      console.warn('Change app language failed', error)
+      showControlStatusMessage(t('status.languageChangeFailed'))
+    }
   }
 
   const toggleProVideoSetting = (enabled: boolean) => {
@@ -3662,6 +3788,7 @@ const DualCamera = () => {
             flashIndicatorEnabled={flashIndicatorEnabled}
             aiSceneEnabled={aiSceneEnabled}
             captureAnalyticsEnabled={captureAnalyticsEnabled}
+            languageLabel={currentLanguageLabel}
             onToggleGrid={setGridEnabled}
             onToggleCaptureTimer={toggleTimedCaptureSetting}
             onTogglePhotoHDR={togglePhotoHDRSetting}
@@ -3680,7 +3807,32 @@ const DualCamera = () => {
             onToggleFlashIndicator={setFlashIndicatorEnabled}
             onToggleAiScene={setAiSceneEnabled}
             onToggleCaptureAnalytics={toggleCaptureAnalyticsSetting}
+            onOpenAbout={() => setPanel('topMenuAbout')}
+            onOpenLanguage={() => setPanel('topMenuLanguage')}
             onBack={() => setPanel('menu')}
+            onClose={() => setPanel(null)}
+          />
+        )}
+
+        {panel === 'topMenuAbout' && (
+          <TopMenuAboutPanel
+            top={insets.top + 68}
+            versionLabel={appVersionLabel}
+            onRateApp={rateApp}
+            onShareApp={shareApp}
+            onFeedback={openFeedback}
+            onOpenPrivacy={openPrivacyTerms}
+            onBack={() => setPanel('topMenuSettings')}
+            onClose={() => setPanel(null)}
+          />
+        )}
+
+        {panel === 'topMenuLanguage' && (
+          <TopMenuLanguagePanel
+            top={insets.top + 68}
+            selectedLanguage={selectedLanguage}
+            onSelectLanguage={selectAppLanguage}
+            onBack={() => setPanel('topMenuSettings')}
             onClose={() => setPanel(null)}
           />
         )}
@@ -3723,8 +3875,8 @@ const DualCamera = () => {
 
         {panel === 'whiteBalance' && (
           <WhiteBalanceControlPanel
-            primaryLabel="后摄像头"
-            secondaryLabel="前摄像头"
+            primaryLabel={t('common.rear')}
+            secondaryLabel={t('common.front')}
             rearPreset={rearWhiteBalancePreset}
             frontPreset={frontWhiteBalancePreset}
             rearSupported={

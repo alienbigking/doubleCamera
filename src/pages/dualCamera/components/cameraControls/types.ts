@@ -8,6 +8,8 @@ export type Panel =
   | 'topMenuAi'
   | 'topMenuAnalytics'
   | 'topMenuSettings'
+  | 'topMenuAbout'
+  | 'topMenuLanguage'
   | 'proQuickIso'
   | 'proQuickShutter'
   | 'proQuickFocus'

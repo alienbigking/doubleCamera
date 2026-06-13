@@ -1,6 +1,7 @@
 import React from 'react'
 import { StyleSheet, Text, View } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { useTranslation } from 'react-i18next'
 import { ToggleRow } from '../controls'
 import { TopMenuPanelShell } from './topMenuPanelShell'
 
@@ -37,67 +38,73 @@ export const TopMenuAiEnhancePanel = ({
   onToggleDistortionCorrection: (value: boolean) => void
   onBack: () => void
   onClose: () => void
-}) => (
-  <TopMenuPanelShell
-    top={top}
-    title="AI增强"
-    icon={
-      <MaterialIcons
-        name="auto-awesome"
-        color="rgba(255,255,255,0.9)"
-        size={22}
-      />
-    }
-    onBack={onBack}
-    onClose={onClose}
-    style={styles.panel}
-  >
-    <View style={styles.introBox}>
-      <Text style={styles.introTitle}>原生增强 v1</Text>
-      <Text style={styles.introText}>
-        这组能力直接调用相机原生管线，优先改善低光、对焦稳定性和广角边缘画面。
-      </Text>
-    </View>
-    <View style={styles.optionGroup}>
-      <ToggleRow
-        icon={<MaterialIcons name="hdr-auto" color="#fff" size={20} />}
-        label="智能 HDR"
-        value={smartHDREnabled}
-        disabled={!smartHDRSupported}
-        valueText={smartHDRSupported ? undefined : '不支持'}
-        onValueChange={onToggleSmartHDR}
-      />
-      <ToggleRow
-        icon={<MaterialIcons name="nightlight" color="#fff" size={20} />}
-        label="低光增强"
-        value={lowLightBoostEnabled}
-        disabled={!lowLightBoostSupported}
-        valueText={lowLightBoostSupported ? undefined : '不支持'}
-        onValueChange={onToggleLowLightBoost}
-      />
-      <ToggleRow
-        icon={
-          <MaterialIcons name="center-focus-strong" color="#fff" size={20} />
-        }
-        label="平滑对焦"
-        value={smoothFocusEnabled}
-        disabled={!smoothFocusSupported}
-        valueText={smoothFocusSupported ? undefined : '不支持'}
-        onValueChange={onToggleSmoothFocus}
-      />
-      <ToggleRow
-        icon={
-          <MaterialIcons name="panorama-wide-angle" color="#fff" size={20} />
-        }
-        label="广角畸变矫正"
-        value={distortionCorrectionEnabled}
-        disabled={!distortionCorrectionSupported}
-        valueText={distortionCorrectionSupported ? undefined : '不支持'}
-        onValueChange={onToggleDistortionCorrection}
-      />
-    </View>
-  </TopMenuPanelShell>
-)
+}) => {
+  const { t } = useTranslation()
+
+  return (
+    <TopMenuPanelShell
+      top={top}
+      title={t('aiEnhancePanel.title')}
+      icon={
+        <MaterialIcons
+          name="auto-awesome"
+          color="rgba(255,255,255,0.9)"
+          size={22}
+        />
+      }
+      onBack={onBack}
+      onClose={onClose}
+      style={styles.panel}
+    >
+      <View style={styles.introBox}>
+        <Text style={styles.introTitle}>{t('aiEnhancePanel.introTitle')}</Text>
+        <Text style={styles.introText}>{t('aiEnhancePanel.introText')}</Text>
+      </View>
+      <View style={styles.optionGroup}>
+        <ToggleRow
+          icon={<MaterialIcons name="hdr-auto" color="#fff" size={20} />}
+          label={t('aiEnhancePanel.smartHDR')}
+          value={smartHDREnabled}
+          disabled={!smartHDRSupported}
+          valueText={smartHDRSupported ? undefined : t('common.unsupported')}
+          onValueChange={onToggleSmartHDR}
+        />
+        <ToggleRow
+          icon={<MaterialIcons name="nightlight" color="#fff" size={20} />}
+          label={t('aiEnhancePanel.lowLightBoost')}
+          value={lowLightBoostEnabled}
+          disabled={!lowLightBoostSupported}
+          valueText={
+            lowLightBoostSupported ? undefined : t('common.unsupported')
+          }
+          onValueChange={onToggleLowLightBoost}
+        />
+        <ToggleRow
+          icon={
+            <MaterialIcons name="center-focus-strong" color="#fff" size={20} />
+          }
+          label={t('aiEnhancePanel.smoothFocus')}
+          value={smoothFocusEnabled}
+          disabled={!smoothFocusSupported}
+          valueText={smoothFocusSupported ? undefined : t('common.unsupported')}
+          onValueChange={onToggleSmoothFocus}
+        />
+        <ToggleRow
+          icon={
+            <MaterialIcons name="panorama-wide-angle" color="#fff" size={20} />
+          }
+          label={t('aiEnhancePanel.distortionCorrection')}
+          value={distortionCorrectionEnabled}
+          disabled={!distortionCorrectionSupported}
+          valueText={
+            distortionCorrectionSupported ? undefined : t('common.unsupported')
+          }
+          onValueChange={onToggleDistortionCorrection}
+        />
+      </View>
+    </TopMenuPanelShell>
+  )
+}
 
 const styles = StyleSheet.create({
   panel: {

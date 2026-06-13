@@ -1,6 +1,13 @@
 import React from 'react'
-import { ScrollView, StyleSheet, Text, View } from 'react-native'
+import {
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
+import { useTranslation } from 'react-i18next'
 import { ModeButton, ToggleRow } from '../controls'
 import type {
   AudioChannelMode,
@@ -16,25 +23,36 @@ const formatVideoResolution = (mode: VideoResolutionMode) =>
   mode === '4k' ? '1080p' : mode
 
 const formatVideoFrameRate = (fps: VideoFrameRateMode) => `${fps}fps`
-const formatAudioChannel = (mode: AudioChannelMode) => {
-  if (mode === 'off') return '关闭'
-  if (mode === 'mono') return '单声道'
-  return '立体声'
+const formatAudioChannel = (
+  mode: AudioChannelMode,
+  t: (key: string) => string,
+) => {
+  if (mode === 'off') return t('options.off')
+  if (mode === 'mono') return t('options.mono')
+  return t('options.stereo')
 }
 
-const formatAudioQuality = (mode: AudioQualityMode) => {
-  if (mode === 'high') return '高清'
-  if (mode === 'max') return '原声'
-  return '标准'
+const formatAudioQuality = (
+  mode: AudioQualityMode,
+  t: (key: string) => string,
+) => {
+  if (mode === 'high') return t('options.high')
+  if (mode === 'max') return t('options.max')
+  return t('options.standard')
 }
 
-const formatComposeMode = (mode: DualVideoComposeMode) =>
-  mode === 'pip' ? '画中画' : '上下分屏'
+const formatComposeMode = (
+  mode: DualVideoComposeMode,
+  t: (key: string) => string,
+) => (mode === 'pip' ? t('options.pip') : t('options.split'))
 
-const formatVideoSaveMode = (mode: VideoSaveMode) => {
-  if (mode === 'combined') return '合成一个'
-  if (mode === 'separate') return '分别保存'
-  return '合成+分别'
+const formatVideoSaveMode = (
+  mode: VideoSaveMode,
+  t: (key: string) => string,
+) => {
+  if (mode === 'combined') return t('options.combined')
+  if (mode === 'separate') return t('options.separate')
+  return t('options.combinedAndSeparate')
 }
 
 // 设置面板：承载右上角菜单里的拍摄、视频、界面和高级设置项。
@@ -60,6 +78,7 @@ export const TopMenuSettingsPanel = ({
   flashIndicatorEnabled,
   aiSceneEnabled,
   captureAnalyticsEnabled,
+  languageLabel,
   onToggleGrid,
   onToggleCaptureTimer,
   onTogglePhotoHDR,
@@ -78,6 +97,8 @@ export const TopMenuSettingsPanel = ({
   onToggleFlashIndicator,
   onToggleAiScene,
   onToggleCaptureAnalytics,
+  onOpenAbout,
+  onOpenLanguage,
   onBack,
   onClose,
 }: {
@@ -102,6 +123,7 @@ export const TopMenuSettingsPanel = ({
   flashIndicatorEnabled: boolean
   aiSceneEnabled: boolean
   captureAnalyticsEnabled: boolean
+  languageLabel: string
   onToggleGrid: (value: boolean) => void
   onToggleCaptureTimer: (value: boolean) => void
   onTogglePhotoHDR: (value: boolean) => void
@@ -120,183 +142,212 @@ export const TopMenuSettingsPanel = ({
   onToggleFlashIndicator: (value: boolean) => void
   onToggleAiScene: (value: boolean) => void
   onToggleCaptureAnalytics: (value: boolean) => void
+  onOpenAbout: () => void
+  onOpenLanguage: () => void
   onBack: () => void
   onClose: () => void
-}) => (
-  <TopMenuPanelShell
-    top={top}
-    title="设置"
-    icon={
-      <MaterialIcons name="settings" color="rgba(255,255,255,0.9)" size={22} />
-    }
-    onBack={onBack}
-    onClose={onClose}
-    style={styles.panel}
-  >
-    <ScrollView
-      style={styles.scroll}
-      contentContainerStyle={styles.scrollContent}
-      showsVerticalScrollIndicator={false}
+}) => {
+  const { t } = useTranslation()
+
+  return (
+    <TopMenuPanelShell
+      top={top}
+      title={t('settings.title')}
+      icon={
+        <MaterialIcons
+          name="settings"
+          color="rgba(255,255,255,0.9)"
+          size={22}
+        />
+      }
+      onBack={onBack}
+      onClose={onClose}
+      style={styles.panel}
     >
-      <SettingsSection title="拍摄设置">
-        <ToggleRow
-          icon={<MaterialIcons name="grid-on" color="#fff" size={20} />}
-          label="网格辅助线"
-          value={gridEnabled}
-          onValueChange={onToggleGrid}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="timer" color="#fff" size={20} />}
-          label="定时拍照"
-          value={captureTimerEnabled}
-          onValueChange={onToggleCaptureTimer}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="hdr-on" color="#fff" size={20} />}
-          label="HDR"
-          value={photoHDREnabled}
-          disabled={!photoHDRSupported}
-          valueText={photoHDRSupported ? undefined : '不支持'}
-          onValueChange={onTogglePhotoHDR}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="camera" color="#fff" size={20} />}
-          label="焦段切换提示"
-          value={lensSwitchHintEnabled}
-          onValueChange={onToggleLensSwitchHint}
-        />
-      </SettingsSection>
+      <ScrollView
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <SettingsSection title={t('settings.captureSection')}>
+          <ToggleRow
+            icon={<MaterialIcons name="grid-on" color="#fff" size={20} />}
+            label={t('settings.grid')}
+            value={gridEnabled}
+            onValueChange={onToggleGrid}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="timer" color="#fff" size={20} />}
+            label={t('settings.captureTimer')}
+            value={captureTimerEnabled}
+            onValueChange={onToggleCaptureTimer}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="hdr-on" color="#fff" size={20} />}
+            label={t('settings.hdr')}
+            value={photoHDREnabled}
+            disabled={!photoHDRSupported}
+            valueText={photoHDRSupported ? undefined : t('common.unsupported')}
+            onValueChange={onTogglePhotoHDR}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="camera" color="#fff" size={20} />}
+            label={t('settings.lensSwitchHint')}
+            value={lensSwitchHintEnabled}
+            onValueChange={onToggleLensSwitchHint}
+          />
+        </SettingsSection>
 
-      <SettingsSection title="视频设置">
-        <ChoiceRow
-          label="分辨率"
-          value={formatVideoResolution(videoResolution)}
-          options={[
-            { label: '720p', value: '720p' },
-            { label: '1080p', value: '1080p' },
-          ]}
-          selectedValue={videoResolution}
-          onSelect={value => onSetVideoResolution(value as VideoResolutionMode)}
-        />
-        <ChoiceRow
-          label="帧率"
-          value={formatVideoFrameRate(videoFrameRate)}
-          options={videoFrameRateOptions.map(option => ({
-            label: `${option}fps`,
-            value: option,
-          }))}
-          selectedValue={videoFrameRate}
-          onSelect={value => onSetVideoFrameRate(value as VideoFrameRateMode)}
-        />
-        <ChoiceRow
-          label="音频声道"
-          value={formatAudioChannel(audioChannelMode)}
-          options={[
-            { label: '关闭', value: 'off' },
-            { label: '单声道', value: 'mono' },
-            { label: '立体声', value: 'stereo' },
-          ]}
-          selectedValue={audioChannelMode}
-          onSelect={value => onSetAudioChannelMode(value as AudioChannelMode)}
-        />
-        <ChoiceRow
-          label="音频质量"
-          value={formatAudioQuality(audioQualityMode)}
-          options={[
-            { label: '标准', value: 'standard' },
-            { label: '高清', value: 'high' },
-            { label: '原声', value: 'max' },
-          ]}
-          selectedValue={audioQualityMode}
-          onSelect={value => onSetAudioQualityMode(value as AudioQualityMode)}
-        />
-        <ChoiceRow
-          label="双视频合成"
-          value={formatComposeMode(dualVideoComposeMode)}
-          options={[
-            { label: '画中画', value: 'pip' },
-            { label: '分屏', value: 'split' },
-          ]}
-          selectedValue={dualVideoComposeMode}
-          onSelect={value =>
-            onSetDualVideoComposeMode(value as DualVideoComposeMode)
-          }
-        />
-        <ChoiceRow
-          label="视频保存"
-          value={formatVideoSaveMode(videoSaveMode)}
-          options={[
-            { label: '合成', value: 'combined' },
-            { label: '分别', value: 'separate' },
-            { label: '同时', value: 'combinedAndSeparate' },
-          ]}
-          selectedValue={videoSaveMode}
-          onSelect={value => onSetVideoSaveMode(value as VideoSaveMode)}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="tune" color="#fff" size={20} />}
-          label="专业模式录制"
-          value={proVideoEnabled}
-          onValueChange={onToggleProVideo}
-        />
-      </SettingsSection>
+        <SettingsSection title={t('settings.videoSection')}>
+          <ChoiceRow
+            label={t('settings.resolution')}
+            value={formatVideoResolution(videoResolution)}
+            options={[
+              { label: '720p', value: '720p' },
+              { label: '1080p', value: '1080p' },
+            ]}
+            selectedValue={videoResolution}
+            onSelect={value =>
+              onSetVideoResolution(value as VideoResolutionMode)
+            }
+          />
+          <ChoiceRow
+            label={t('settings.frameRate')}
+            value={formatVideoFrameRate(videoFrameRate)}
+            options={videoFrameRateOptions.map(option => ({
+              label: `${option}fps`,
+              value: option,
+            }))}
+            selectedValue={videoFrameRate}
+            onSelect={value => onSetVideoFrameRate(value as VideoFrameRateMode)}
+          />
+          <ChoiceRow
+            label={t('settings.audioChannel')}
+            value={formatAudioChannel(audioChannelMode, t)}
+            options={[
+              { label: t('options.off'), value: 'off' },
+              { label: t('options.mono'), value: 'mono' },
+              { label: t('options.stereo'), value: 'stereo' },
+            ]}
+            selectedValue={audioChannelMode}
+            onSelect={value => onSetAudioChannelMode(value as AudioChannelMode)}
+          />
+          <ChoiceRow
+            label={t('settings.audioQuality')}
+            value={formatAudioQuality(audioQualityMode, t)}
+            options={[
+              { label: t('options.standard'), value: 'standard' },
+              { label: t('options.high'), value: 'high' },
+              { label: t('options.max'), value: 'max' },
+            ]}
+            selectedValue={audioQualityMode}
+            onSelect={value => onSetAudioQualityMode(value as AudioQualityMode)}
+          />
+          <ChoiceRow
+            label={t('settings.dualVideoCompose')}
+            value={formatComposeMode(dualVideoComposeMode, t)}
+            options={[
+              { label: t('options.pip'), value: 'pip' },
+              { label: t('options.split'), value: 'split' },
+            ]}
+            selectedValue={dualVideoComposeMode}
+            onSelect={value =>
+              onSetDualVideoComposeMode(value as DualVideoComposeMode)
+            }
+          />
+          <ChoiceRow
+            label={t('settings.videoSave')}
+            value={formatVideoSaveMode(videoSaveMode, t)}
+            options={[
+              { label: t('options.combined'), value: 'combined' },
+              { label: t('options.separate'), value: 'separate' },
+              {
+                label: t('options.combinedAndSeparate'),
+                value: 'combinedAndSeparate',
+              },
+            ]}
+            selectedValue={videoSaveMode}
+            onSelect={value => onSetVideoSaveMode(value as VideoSaveMode)}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="tune" color="#fff" size={20} />}
+            label={t('settings.proVideo')}
+            value={proVideoEnabled}
+            onValueChange={onToggleProVideo}
+          />
+        </SettingsSection>
 
-      <SettingsSection title="界面设置">
-        <ToggleRow
-          icon={<MaterialIcons name="volume-up" color="#fff" size={20} />}
-          label="音量键快门"
-          value={volumeShutterEnabled}
-          onValueChange={onToggleVolumeShutter}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="place" color="#fff" size={20} />}
-          label="保存位置信息"
-          value={saveLocationEnabled}
-          onValueChange={onToggleSaveLocation}
-        />
-        <ToggleRow
-          icon={
-            <MaterialIcons
-              name="picture-in-picture-alt"
-              color="#fff"
-              size={20}
-            />
-          }
-          label="小窗白色边框"
-          value={pipBorderVisible}
-          onValueChange={onTogglePipBorder}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="battery-saver" color="#fff" size={20} />}
-          label="降低透明度省电"
-          value={reduceTransparencyEnabled}
-          onValueChange={onToggleReduceTransparency}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="flash-on" color="#fff" size={20} />}
-          label="显示闪光灯标识"
-          value={flashIndicatorEnabled}
-          onValueChange={onToggleFlashIndicator}
-        />
-      </SettingsSection>
+        <SettingsSection title={t('settings.displaySection')}>
+          <ToggleRow
+            icon={<MaterialIcons name="volume-up" color="#fff" size={20} />}
+            label={t('settings.volumeShutter')}
+            value={volumeShutterEnabled}
+            onValueChange={onToggleVolumeShutter}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="place" color="#fff" size={20} />}
+            label={t('settings.saveLocation')}
+            value={saveLocationEnabled}
+            onValueChange={onToggleSaveLocation}
+          />
+          <ToggleRow
+            icon={
+              <MaterialIcons
+                name="picture-in-picture-alt"
+                color="#fff"
+                size={20}
+              />
+            }
+            label={t('settings.pipBorder')}
+            value={pipBorderVisible}
+            onValueChange={onTogglePipBorder}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="battery-saver" color="#fff" size={20} />}
+            label={t('settings.reduceTransparency')}
+            value={reduceTransparencyEnabled}
+            onValueChange={onToggleReduceTransparency}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="flash-on" color="#fff" size={20} />}
+            label={t('settings.flashIndicator')}
+            value={flashIndicatorEnabled}
+            onValueChange={onToggleFlashIndicator}
+          />
+        </SettingsSection>
 
-      <SettingsSection title="高级设置">
-        <ToggleRow
-          icon={<MaterialIcons name="auto-awesome" color="#fff" size={20} />}
-          label="AI场景识别"
-          value={aiSceneEnabled}
-          onValueChange={onToggleAiScene}
-        />
-        <ToggleRow
-          icon={<MaterialIcons name="analytics" color="#fff" size={20} />}
-          label="拍摄数据分析"
-          value={captureAnalyticsEnabled}
-          onValueChange={onToggleCaptureAnalytics}
-        />
-      </SettingsSection>
-    </ScrollView>
-  </TopMenuPanelShell>
-)
+        <SettingsSection title={t('settings.advancedSection')}>
+          <ToggleRow
+            icon={<MaterialIcons name="auto-awesome" color="#fff" size={20} />}
+            label={t('settings.aiScene')}
+            value={aiSceneEnabled}
+            onValueChange={onToggleAiScene}
+          />
+          <ToggleRow
+            icon={<MaterialIcons name="analytics" color="#fff" size={20} />}
+            label={t('settings.captureAnalytics')}
+            value={captureAnalyticsEnabled}
+            onValueChange={onToggleCaptureAnalytics}
+          />
+        </SettingsSection>
+
+        <SettingsSection title={t('settings.aboutAndLanguage')}>
+          <SettingEntry
+            icon={<MaterialIcons name="info-outline" color="#fff" size={20} />}
+            label={t('settings.aboutEntry')}
+            onPress={onOpenAbout}
+          />
+          <SettingEntry
+            icon={<MaterialIcons name="translate" color="#fff" size={20} />}
+            label={t('settings.languageEntry')}
+            value={languageLabel}
+            onPress={onOpenLanguage}
+          />
+        </SettingsSection>
+      </ScrollView>
+    </TopMenuPanelShell>
+  )
+}
 
 const SettingsSection = ({
   title,
@@ -340,6 +391,33 @@ const ChoiceRow = ({
       ))}
     </View>
   </View>
+)
+
+const SettingEntry = ({
+  icon,
+  label,
+  value,
+  onPress,
+}: {
+  icon: React.ReactNode
+  label: string
+  value?: string
+  onPress: () => void
+}) => (
+  <TouchableOpacity
+    style={styles.settingEntry}
+    activeOpacity={0.78}
+    onPress={onPress}
+  >
+    <View style={styles.settingEntryLeft}>
+      <View style={styles.settingEntryIcon}>{icon}</View>
+      <Text style={styles.settingEntryLabel}>{label}</Text>
+    </View>
+    <View style={styles.settingEntryRight}>
+      {value ? <Text style={styles.settingEntryValue}>{value}</Text> : null}
+      <Text style={styles.settingEntryArrow}>›</Text>
+    </View>
+  </TouchableOpacity>
 )
 
 const styles = StyleSheet.create({
@@ -398,5 +476,44 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
+  },
+  settingEntry: {
+    minHeight: 46,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  settingEntryLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  settingEntryIcon: {
+    width: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  settingEntryLabel: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '400',
+  },
+  settingEntryRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  settingEntryValue: {
+    color: '#58e8ff',
+    fontSize: 12,
+    fontWeight: '400',
+  },
+  settingEntryArrow: {
+    color: 'rgba(255,255,255,0.78)',
+    fontSize: 24,
+    fontWeight: '400',
   },
 })

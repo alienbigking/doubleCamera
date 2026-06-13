@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import {
   NavigationContainer,
   type NavigationState,
@@ -9,10 +9,28 @@ import AppNavigator from '@/navigation/appNavigator'
 import { navigationRef } from '@/navigation/navigationService'
 import ToastManager from 'toastify-react-native'
 import { useNavigationStore } from '@/navigation/stores'
+import { initI18n } from '@/i18n'
 
 const RootContainer = () => {
+  const [i18nReady, setI18nReady] = useState(false)
   const [navReady, setNavReady] = useState(false)
   const { setCurrentRoute } = useNavigationStore()
+
+  useEffect(() => {
+    let mounted = true
+
+    initI18n()
+      .catch(error => {
+        console.warn('Initialize i18n failed', error)
+      })
+      .finally(() => {
+        if (mounted) setI18nReady(true)
+      })
+
+    return () => {
+      mounted = false
+    }
+  }, [])
 
   const onNavigationStateChange = useCallback(
     (state: NavigationState | undefined) => {
@@ -23,6 +41,8 @@ const RootContainer = () => {
     },
     [setCurrentRoute],
   )
+
+  if (!i18nReady) return null
 
   return (
     <SafeAreaProvider>

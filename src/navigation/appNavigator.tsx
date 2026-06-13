@@ -1,6 +1,7 @@
 import React from 'react'
 import { createNativeStackNavigator } from '@react-navigation/native-stack'
 import DualCamera from '@/pages/dualCamera/components/dualCamera'
+import PrivacyPolicy from '@/pages/privacyPolicy/components'
 
 export type RootStackParamList = {
   Camera: undefined
@@ -31,6 +32,7 @@ const AppNavigator = () => {
       initialRouteName="Camera"
     >
       <Stack.Screen name="Camera" component={DualCamera} />
+      <Stack.Screen name="PrivacyPolicy" component={PrivacyPolicy} />
     </Stack.Navigator>
   )
 }
