@@ -102,7 +102,7 @@ export const translationResources = {
       aboutPanel: {
         title: '关于',
         rateUs: '评分鼓励我们',
-        shareApp: '分享 2Camera',
+        shareApp: '分享 小熊双摄',
         feedback: '反馈 & 建议',
         privacy: '隐私 & 条款',
       },
@@ -130,7 +130,7 @@ export const translationResources = {
         saved: '已保存',
         failed: '保存失败，请重试',
         fallback: '合成失败，已保存原始视频',
-        saving: '双摄数据处理量大，保存需要时间，请稍等',
+        saving: '保存数据中',
       },
       sceneHints: {
         portraitLabel: '已识别人像',

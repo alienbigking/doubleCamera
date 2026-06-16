@@ -15,6 +15,8 @@
 		762001072F1A0004006654EE /* DualVideoComposerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 762001062F1A0004006654EE /* DualVideoComposerBridge.m */; };
 		762001092F1A0005006654EE /* NativeBlurView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001082F1A0005006654EE /* NativeBlurView.swift */; };
 		7620010B2F1A0006006654EE /* NativeBlurViewBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7620010A2F1A0006006654EE /* NativeBlurViewBridge.m */; };
+		7620010D2F1A0007006654EE /* DualPhotoComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7620010C2F1A0007006654EE /* DualPhotoComposer.swift */; };
+		7620010F2F1A0008006654EE /* DualPhotoComposerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7620010E2F1A0008006654EE /* DualPhotoComposerBridge.m */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		8A488C4C24E620A660F72D6E /* libPods-doubleCamera.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FE4C9C9F0114384DAD2A46A6 /* libPods-doubleCamera.a */; };
 		DA91C740C1E113133FD63ADB /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
@@ -34,6 +36,8 @@
 		762001062F1A0004006654EE /* DualVideoComposerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DualVideoComposerBridge.m; path = doubleCamera/DualVideoComposerBridge.m; sourceTree = "<group>"; };
 		762001082F1A0005006654EE /* NativeBlurView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeBlurView.swift; path = doubleCamera/NativeBlurView.swift; sourceTree = "<group>"; };
 		7620010A2F1A0006006654EE /* NativeBlurViewBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NativeBlurViewBridge.m; path = doubleCamera/NativeBlurViewBridge.m; sourceTree = "<group>"; };
+		7620010C2F1A0007006654EE /* DualPhotoComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DualPhotoComposer.swift; path = doubleCamera/DualPhotoComposer.swift; sourceTree = "<group>"; };
+		7620010E2F1A0008006654EE /* DualPhotoComposerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DualPhotoComposerBridge.m; path = doubleCamera/DualPhotoComposerBridge.m; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = doubleCamera/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A90794981F064F2013ADE0BD /* Pods-doubleCamera.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-doubleCamera.debug.xcconfig"; path = "Target Support Files/Pods-doubleCamera/Pods-doubleCamera.debug.xcconfig"; sourceTree = "<group>"; };
 		AA1DA52D3F704EDB903CCA19 /* Colors.xcassets */ = {isa = PBXFileReference; explicitFileType = undefined; fileEncoding = 9; includeInIndex = 0; lastKnownFileType = folder.assetcatalog; name = Colors.xcassets; path = doubleCamera/Colors.xcassets; sourceTree = "<group>"; };
@@ -73,6 +77,8 @@
 				762001022F1A0002006654EE /* VolumeButtonManagerBridge.m */,
 				762001042F1A0003006654EE /* DualVideoComposer.swift */,
 				762001062F1A0004006654EE /* DualVideoComposerBridge.m */,
+				7620010C2F1A0007006654EE /* DualPhotoComposer.swift */,
+				7620010E2F1A0008006654EE /* DualPhotoComposerBridge.m */,
 				762001082F1A0005006654EE /* NativeBlurView.swift */,
 				7620010A2F1A0006006654EE /* NativeBlurViewBridge.m */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
@@ -288,6 +294,8 @@
 				762001032F1A0002006654EE /* VolumeButtonManagerBridge.m in Sources */,
 				762001052F1A0003006654EE /* DualVideoComposer.swift in Sources */,
 				762001072F1A0004006654EE /* DualVideoComposerBridge.m in Sources */,
+				7620010D2F1A0007006654EE /* DualPhotoComposer.swift in Sources */,
+				7620010F2F1A0008006654EE /* DualPhotoComposerBridge.m in Sources */,
 				762001092F1A0005006654EE /* NativeBlurView.swift in Sources */,
 				7620010B2F1A0006006654EE /* NativeBlurViewBridge.m in Sources */,
 			);

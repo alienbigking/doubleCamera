@@ -1,8 +1,8 @@
 import RNFS from 'react-native-fs'
 import {
-  ImageFormat,
   Skia,
   type SkCanvas,
+  type SkData,
   type SkImage,
   type SkRect,
 } from '@shopify/react-native-skia'
@@ -24,6 +24,9 @@ import {
   fitSizeToAspectRatio,
   resolvePhotoOutputAspectRatio,
 } from '../photoOutputRatio'
+import { writeSkiaJpegToPath } from '../skiaImageExport'
+
+type LoadedImage = { image: SkImage; data?: SkData }
 
 const stripFileScheme = (uri: string) =>
   uri.startsWith('file://') ? uri.replace('file://', '') : uri
@@ -31,7 +34,12 @@ const stripFileScheme = (uri: string) =>
 const ensureFileUri = (uri: string) =>
   uri.startsWith('file://') ? uri : `file://${uri}`
 
-const loadImage = async (uri: string) => {
+const disposeLoadedImage = ({ image, data }: LoadedImage) => {
+  image.dispose()
+  data?.dispose()
+}
+
+const loadImage = async (uri: string): Promise<LoadedImage> => {
   const directData = await Skia.Data.fromURI(ensureFileUri(uri)).catch(
     () => null,
   )
@@ -40,18 +48,11 @@ const loadImage = async (uri: string) => {
     : null
 
   if (directImage) {
-    return directImage
+    return { image: directImage, data: directData || undefined }
   }
 
-  const base64 = await RNFS.readFile(stripFileScheme(uri), 'base64')
-  const fallbackData = Skia.Data.fromBase64(base64)
-  const image = Skia.Image.MakeImageFromEncoded(fallbackData)
-
-  if (!image) {
-    throw new Error(`Failed to decode image: ${uri}`)
-  }
-
-  return image
+  directData?.dispose()
+  throw new Error(`Failed to decode image without Base64 fallback: ${uri}`)
 }
 
 const fitCanvasSize = (
@@ -158,7 +159,8 @@ export const applyFilterToPhoto = async (
     return uri
   }
 
-  const image = await loadImage(uri)
+  const loadedImage = await loadImage(uri)
+  const image = loadedImage.image
 
   try {
     const size = fitSizeToAspectRatio(
@@ -189,9 +191,8 @@ export const applyFilterToPhoto = async (
       snapshot = surface.makeImageSnapshot()
       const { jpegQuality } =
         getDualCameraFilterRenderQualityPreset(renderQuality)
-      const base64 = snapshot.encodeToBase64(ImageFormat.JPEG, jpegQuality)
       const outputPath = createOutputPath(filterId)
-      await RNFS.writeFile(outputPath, base64, 'base64')
+      await writeSkiaJpegToPath(snapshot, outputPath, jpegQuality)
 
       return `file://${outputPath}`
     } finally {
@@ -199,6 +200,6 @@ export const applyFilterToPhoto = async (
       surface.dispose()
     }
   } finally {
-    image.dispose()
+    disposeLoadedImage(loadedImage)
   }
 }

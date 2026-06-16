@@ -1,10 +1,11 @@
 import RNFS from 'react-native-fs'
+import { NativeModules, Platform } from 'react-native'
 import {
   ClipOp,
-  ImageFormat,
   PaintStyle,
   Skia,
-  type SkRect,
+  type SkData,
+  type SkImage,
 } from '@shopify/react-native-skia'
 import type { LayoutMode } from './cameraControls'
 import {
@@ -18,11 +19,35 @@ import {
   fitSizeToAspectRatio,
   resolvePhotoOutputAspectRatio,
 } from './photoOutputRatio'
+import { writeSkiaJpegToPath } from './skiaImageExport'
 
 type CameraSide = 'rear' | 'front'
 type Point = { x: number; y: number }
 type Size = { width: number; height: number }
 type CapturedPhotoFiles = Record<CameraSide, string> & { capturedAt: string }
+type LoadedImage = { image: SkImage; data?: SkData }
+type DualPhotoComposerModule = {
+  composeDualPhoto: (
+    rearPhotoPath: string,
+    frontPhotoPath: string,
+    layout: LayoutMode,
+    pipX: number,
+    pipY: number,
+    pipWidth: number,
+    pipHeight: number,
+    previewWidth: number,
+    previewHeight: number,
+    aspectRatio: number,
+    maxLongSide: number,
+    jpegQuality: number,
+    primaryCamera: CameraSide,
+    pipBorderVisible: boolean,
+  ) => Promise<string>
+}
+
+const nativeComposer = NativeModules.DualPhotoComposer as
+  | DualPhotoComposerModule
+  | undefined
 
 export type ComposePhotoOptions = {
   photos: CapturedPhotoFiles
@@ -44,7 +69,12 @@ const stripFileScheme = (uri: string) =>
 const ensureFileUri = (uri: string) =>
   uri.startsWith('file://') ? uri : `file://${uri}`
 
-const loadImage = async (uri: string) => {
+const disposeLoadedImage = ({ image, data }: LoadedImage) => {
+  image.dispose()
+  data?.dispose()
+}
+
+const loadImage = async (uri: string): Promise<LoadedImage> => {
   const directData = await Skia.Data.fromURI(ensureFileUri(uri)).catch(
     () => null,
   )
@@ -53,22 +83,15 @@ const loadImage = async (uri: string) => {
     : null
 
   if (directImage) {
-    return directImage
+    return { image: directImage, data: directData || undefined }
   }
 
-  const base64 = await RNFS.readFile(stripFileScheme(uri), 'base64')
-  const fallbackData = Skia.Data.fromBase64(base64)
-  const image = Skia.Image.MakeImageFromEncoded(fallbackData)
-
-  if (!image) {
-    throw new Error(`Failed to decode image: ${uri}`)
-  }
-
-  return image
+  directData?.dispose()
+  throw new Error(`Failed to decode image without Base64 fallback: ${uri}`)
 }
 
 const fitCanvasSize = (
-  image: Awaited<ReturnType<typeof loadImage>>,
+  image: SkImage,
   renderQuality: DualCameraFilterRenderQuality,
 ): Size => {
   const { maxLongSide } = getDualCameraFilterRenderQualityPreset(renderQuality)
@@ -100,20 +123,47 @@ export const composeDualPhoto = async ({
   toneAdjustments,
   pipBorderVisible = true,
 }: ComposePhotoOptions) => {
-  const secondaryCamera: CameraSide =
-    primaryCamera === 'rear' ? 'front' : 'rear'
-  const primaryImage = await loadImage(photos[primaryCamera])
-  const secondaryImage = await loadImage(photos[secondaryCamera])
-
-  try {
-    const fittedPrimarySize = fitCanvasSize(primaryImage, renderQuality)
-    const outputAspectRatio = resolvePhotoOutputAspectRatio({
+  const outputAspectRatio =
+    resolvePhotoOutputAspectRatio({
       ratio,
       previewSize,
-    })
+    }) || 0
+  const qualityPreset = getDualCameraFilterRenderQualityPreset(renderQuality)
+
+  if (Platform.OS === 'ios' && nativeComposer?.composeDualPhoto) {
+    return nativeComposer.composeDualPhoto(
+      stripFileScheme(photos.rear),
+      stripFileScheme(photos.front),
+      layout,
+      pipPosition.x,
+      pipPosition.y,
+      pipSize.width,
+      pipSize.height,
+      previewSize.width,
+      previewSize.height,
+      outputAspectRatio,
+      qualityPreset.maxLongSide,
+      qualityPreset.jpegQuality,
+      primaryCamera,
+      pipBorderVisible,
+    )
+  }
+
+  const secondaryCamera: CameraSide =
+    primaryCamera === 'rear' ? 'front' : 'rear'
+  let primaryLoadedImage: LoadedImage | undefined
+  let secondaryLoadedImage: LoadedImage | undefined
+
+  try {
+    primaryLoadedImage = await loadImage(photos[primaryCamera])
+    secondaryLoadedImage = await loadImage(photos[secondaryCamera])
+
+    const primaryImage = primaryLoadedImage.image
+    const secondaryImage = secondaryLoadedImage.image
+    const fittedPrimarySize = fitCanvasSize(primaryImage, renderQuality)
     const fittedOutputSize = fitSizeToAspectRatio(
       fittedPrimarySize,
-      outputAspectRatio,
+      outputAspectRatio || undefined,
     )
     const canvasSize =
       layout === 'split'
@@ -229,14 +279,8 @@ export const composeDualPhoto = async ({
 
       surface.flush()
       snapshot = surface.makeImageSnapshot()
-      const { jpegQuality } =
-        getDualCameraFilterRenderQualityPreset(renderQuality)
-      const outputBase64 = snapshot.encodeToBase64(
-        ImageFormat.JPEG,
-        jpegQuality,
-      )
       const outputPath = createOutputPath()
-      await RNFS.writeFile(outputPath, outputBase64, 'base64')
+      await writeSkiaJpegToPath(snapshot, outputPath, qualityPreset.jpegQuality)
 
       return `file://${outputPath}`
     } finally {
@@ -244,7 +288,11 @@ export const composeDualPhoto = async ({
       surface.dispose()
     }
   } finally {
-    primaryImage.dispose()
-    secondaryImage.dispose()
+    if (primaryLoadedImage) {
+      disposeLoadedImage(primaryLoadedImage)
+    }
+    if (secondaryLoadedImage) {
+      disposeLoadedImage(secondaryLoadedImage)
+    }
   }
 }

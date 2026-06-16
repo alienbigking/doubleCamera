@@ -127,7 +127,6 @@ import {
 import { useTranslation } from 'react-i18next'
 import { navigate } from '@/navigation/navigationService'
 import {
-  appConfig,
   getFeedbackMailtoUrl,
   getStoreUrl,
 } from '@/config/appConfig'
@@ -447,6 +446,14 @@ const isPermissionGranted = (status: string) =>
 
 const wait = (milliseconds: number) =>
   new Promise<void>(resolve => setTimeout(resolve, milliseconds))
+
+const deferUnlinkFile = (uri?: string, delayMs = 30_000) => {
+  if (!uri) return
+
+  setTimeout(() => {
+    void safeUnlinkFile(uri)
+  }, delayMs)
+}
 
 const safeUnlinkFile = async (uri?: string) => {
   if (!uri) return
@@ -2140,7 +2147,7 @@ const DualCamera = () => {
     try {
       const storeUrl = getStoreUrl() || undefined
       await Share.share({
-        message: `${appConfig.name} - DualCam`,
+        message: '小熊双摄',
         url: storeUrl,
       })
     } catch (error) {
@@ -2582,23 +2589,44 @@ const DualCamera = () => {
 
   const saveCombinedPhotoAsset = async (photos: CapturedPhotoFiles) => {
     const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
-    const combinedPhotoUri = await composeDualPhoto({
-      photos,
-      layout,
-      primaryCamera,
-      pipPosition: localPipPosition,
-      pipSize,
-      previewSize,
-      ratio,
-      filterId: selectedFilterId,
-      renderQuality: filterRenderQuality,
-      toneAdjustments,
-      pipBorderVisible,
-    })
-    return CameraRoll.saveAsset(combinedPhotoUri, {
-      type: 'photo',
-      album: albumName,
-    }).finally(() => safeUnlinkFile(combinedPhotoUri))
+    const saveComposedAsset = async (
+      renderQuality: DualCameraFilterRenderQuality,
+    ) => {
+      const combinedPhotoUri = await composeDualPhoto({
+        photos,
+        layout,
+        primaryCamera,
+        pipPosition: localPipPosition,
+        pipSize,
+        previewSize,
+        ratio,
+        filterId: selectedFilterId,
+        renderQuality,
+        toneAdjustments,
+        pipBorderVisible,
+      })
+
+      return CameraRoll.saveAsset(combinedPhotoUri, {
+        type: 'photo',
+        album: albumName,
+      }).finally(() => {
+        void safeUnlinkFile(combinedPhotoUri)
+      })
+    }
+
+    try {
+      return await saveComposedAsset(filterRenderQuality)
+    } catch (error) {
+      if (filterRenderQuality === 'standard') {
+        throw error
+      }
+
+      console.warn(
+        'Combined photo save failed at selected quality, retrying standard quality',
+        error,
+      )
+      return saveComposedAsset('standard')
+    }
   }
 
   const saveSeparatePhotos = async (photos: CapturedPhotoFiles) => {
@@ -2710,11 +2738,11 @@ const DualCamera = () => {
           }),
         )
       }
-      showSaveFeedback('saved')
+      showSaveFeedback(saved ? 'saved' : 'failed')
     } catch (error) {
       console.warn('Dual camera capture failed', error)
       trackCaptureAnalytics(() => trackCaptureFailure('photo'))
-      showSaveFeedback(null)
+      showSaveFeedback('failed')
     } finally {
       if (photos) {
         await safeUnlinkFile(photos.rear)
@@ -3907,7 +3935,7 @@ const DualCamera = () => {
           },
         ]}
       />
-      <SaveFeedbackToast feedback={saveFeedback} bottom={insets.bottom + 132} />
+      <SaveFeedbackToast feedback={saveFeedback} bottom={insets.bottom + 152} />
       <ControlStatusToast
         message={controlStatusMessage}
         bottom={insets.bottom + 224}

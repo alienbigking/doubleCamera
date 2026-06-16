@@ -14,8 +14,8 @@ export const dualCameraFilterRenderQualityPresets: DualCameraFilterRenderQuality
       id: 'standard',
       label: '标准',
       description: '保存更快，发热更低',
-      maxLongSide: 1440,
-      jpegQuality: 88,
+      maxLongSide: 2560,
+      jpegQuality: 92,
     },
     {
       id: '4k',
