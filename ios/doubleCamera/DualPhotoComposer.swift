@@ -181,7 +181,8 @@ final class DualPhotoComposer: NSObject {
     }
 
     let options: [CFString: Any] = [
-      kCGImageSourceCreateThumbnailFromImageAlways: true,
+      // kCGImageSourceCreateThumbnailFromImageAlways: true,
+      kCGImageSourceCreateThumbnailFromImageIfAbsent: true,
       kCGImageSourceCreateThumbnailWithTransform: true,
       kCGImageSourceThumbnailMaxPixelSize: max(1, Int(ceil(maxSide))),
       kCGImageSourceShouldCacheImmediately: false,
