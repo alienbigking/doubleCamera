@@ -91,6 +91,7 @@ import {
 import {
   applyFilterToPhoto,
   defaultProfessionalToneAdjustments,
+  getDualCameraPhotoCaptureResolution,
   hasProfessionalToneAdjustments,
   type DualCameraFilterId,
   type DualCameraFilterRenderQuality,
@@ -126,10 +127,7 @@ import {
 } from '@/i18n'
 import { useTranslation } from 'react-i18next'
 import { navigate } from '@/navigation/navigationService'
-import {
-  getFeedbackMailtoUrl,
-  getStoreUrl,
-} from '@/config/appConfig'
+import { getFeedbackMailtoUrl, getStoreUrl } from '@/config/appConfig'
 
 type CameraSide = 'rear' | 'front'
 type PreviewStatus = 'loading' | 'ready' | 'denied' | 'unavailable' | 'error'
@@ -1122,14 +1120,16 @@ const DualCamera = () => {
         sceneObjectOutputsRef.current = sceneObjectOutputs
         const rearObjectOutput = sceneObjectOutputs.rear
         const frontObjectOutput = sceneObjectOutputs.front
+        const photoCaptureResolution =
+          getDualCameraPhotoCaptureResolution(filterRenderQuality)
         const rearPhotoOutput = VisionCamera.createPhotoOutput({
-          targetResolution: CommonResolutions.UHD_4_3,
+          targetResolution: photoCaptureResolution,
           containerFormat: 'jpeg',
           quality: 0.96,
           qualityPrioritization: 'quality',
         })
         const frontPhotoOutput = VisionCamera.createPhotoOutput({
-          targetResolution: CommonResolutions.UHD_4_3,
+          targetResolution: photoCaptureResolution,
           containerFormat: 'jpeg',
           quality: 0.96,
           qualityPrioritization: 'quality',
@@ -1309,7 +1309,13 @@ const DualCamera = () => {
         tapFocusTimerRef.current = null
       }
     }
-  }, [aiSceneEnabled, photoHDREnabled, realtimeFilterFrameOutputs])
+  }, [
+    aiSceneEnabled,
+    filterRenderQuality,
+    localizeLensOption,
+    photoHDREnabled,
+    realtimeFilterFrameOutputs,
+  ])
 
   useEffect(() => {
     if (previewStatus !== 'ready' || mode !== 'photo') return
@@ -2108,8 +2114,14 @@ const DualCamera = () => {
   }
 
   const selectPhotoRenderQuality = (quality: DualCameraFilterRenderQuality) => {
+    if (quality === filterRenderQuality) return
+
     setFilterRenderQuality(quality)
     showControlStatusMessage(`照片质量：${getPhotoRenderQualityLabel(quality)}`)
+
+    if (mode !== 'photo' || previewStatus !== 'ready') return
+
+    setVideoCaptureReady(false)
   }
 
   const updateToneAdjustment = (
@@ -3749,7 +3761,7 @@ const DualCamera = () => {
             selectedFilterId={selectedFilterId}
             selectedRenderQuality={filterRenderQuality}
             onSelectFilter={selectFilter}
-            onSelectRenderQuality={setFilterRenderQuality}
+            onSelectRenderQuality={selectPhotoRenderQuality}
             onBack={() => setPanel('menu')}
             onClose={() => setPanel(null)}
           />

@@ -1,3 +1,5 @@
+import { CommonResolutions, type Size } from 'react-native-vision-camera'
+
 export type DualCameraFilterRenderQuality = 'standard' | '4k'
 
 export type DualCameraFilterRenderQualityPreset = {
@@ -6,6 +8,7 @@ export type DualCameraFilterRenderQualityPreset = {
   description: string
   maxLongSide: number
   jpegQuality: number
+  captureResolution: Size
 }
 
 export const dualCameraFilterRenderQualityPresets: DualCameraFilterRenderQualityPreset[] =
@@ -16,6 +19,7 @@ export const dualCameraFilterRenderQualityPresets: DualCameraFilterRenderQuality
       description: '保存更快，发热更低',
       maxLongSide: 2560,
       jpegQuality: 92,
+      captureResolution: CommonResolutions.QHD_4_3,
     },
     {
       id: '4k',
@@ -23,6 +27,7 @@ export const dualCameraFilterRenderQualityPresets: DualCameraFilterRenderQuality
       description: '优先导出 4K 尺寸，细节更多',
       maxLongSide: 4032,
       jpegQuality: 96,
+      captureResolution: CommonResolutions.UHD_4_3,
     },
   ]
 
@@ -31,3 +36,7 @@ export const getDualCameraFilterRenderQualityPreset = (
 ) =>
   dualCameraFilterRenderQualityPresets.find(item => item.id === quality) ||
   dualCameraFilterRenderQualityPresets[0]
+
+export const getDualCameraPhotoCaptureResolution = (
+  quality: DualCameraFilterRenderQuality,
+) => getDualCameraFilterRenderQualityPreset(quality).captureResolution

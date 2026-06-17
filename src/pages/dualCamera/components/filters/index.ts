@@ -7,6 +7,7 @@ export {
 export {
   dualCameraFilterRenderQualityPresets,
   getDualCameraFilterRenderQualityPreset,
+  getDualCameraPhotoCaptureResolution,
   type DualCameraFilterRenderQuality,
   type DualCameraFilterRenderQualityPreset,
 } from './filterRenderQualityPresets'
