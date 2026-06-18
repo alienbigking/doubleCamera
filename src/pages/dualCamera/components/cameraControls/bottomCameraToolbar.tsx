@@ -61,18 +61,9 @@ export const BottomCameraToolbar = ({
             {!recording && mode === 'video' && videoStatusText ? (
               <Text style={styles.videoStatus}>{videoStatusText}</Text>
             ) : null}
-            <View
-              style={[
-                styles.controlRowInline,
-                recording && styles.controlRowInlineRecording,
-              ]}
-            >
-              <View
-                style={[
-                  styles.controlGridSlot,
-                  !recording && styles.controlGridSlotAuto,
-                ]}
-              >
+            <View style={styles.controlRowInline}>
+              <View style={styles.controlGridSlotDouble} />
+              <View style={styles.controlGridSlot}>
                 <TouchableOpacity
                   style={[
                     styles.controlChip,
@@ -96,12 +87,13 @@ export const BottomCameraToolbar = ({
                   !recording && styles.timerGridSlotHidden,
                 ]}
               >
-                {recording ? (
-                  <Text style={styles.timer}>
-                    {formatDuration(recordingSeconds)}
-                  </Text>
-                ) : null}
+                <Text
+                  style={[styles.timer, !recording && styles.timerPlaceholder]}
+                >
+                  {recording ? formatDuration(recordingSeconds) : '00:00'}
+                </Text>
               </View>
+              <View style={styles.controlGridSlot} />
             </View>
           </View>
         </View>
@@ -234,10 +226,6 @@ const styles = StyleSheet.create({
     width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  controlRowInlineRecording: {
-    justifyContent: 'space-between',
   },
   controlGridSlot: {
     flex: 1,
@@ -246,15 +234,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  controlGridSlotAuto: {
-    flex: 0,
-    flexBasis: 'auto',
+  controlGridSlotDouble: {
+    flex: 2,
+    flexBasis: 0,
+    minWidth: 0,
   },
   timerGridSlot: {
-    alignItems: 'flex-end',
+    alignItems: 'center',
   },
   timerGridSlotHidden: {
-    display: 'none',
+    opacity: 0,
   },
   controlChip: {
     flexDirection: 'row',
@@ -279,6 +268,9 @@ const styles = StyleSheet.create({
     fontWeight: '400',
     textAlign: 'center',
     fontVariant: ['tabular-nums'],
+  },
+  timerPlaceholder: {
+    color: 'transparent',
   },
   videoStatus: {
     color: 'rgba(255,255,255,0.74)',

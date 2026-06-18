@@ -39,6 +39,7 @@ export const translationResources = {
         aiEnhance: 'AI增强',
         gallery: '相册',
         analytics: '拍摄统计',
+        nativeCameraTest: '原生双摄测试',
         settings: '设置',
       },
       settings: {
@@ -69,6 +70,7 @@ export const translationResources = {
         flashIndicator: '显示闪光灯标识',
         aiScene: 'AI场景识别',
         captureAnalytics: '拍摄数据分析',
+        nativeCameraPipeline: '原生双摄拍照测试',
       },
       displayPanel: {
         title: '显示与界面',
@@ -204,6 +206,7 @@ export const translationResources = {
         aiEnhance: 'AI Enhance',
         gallery: 'Gallery',
         analytics: 'Capture Analytics',
+        nativeCameraTest: 'Native Dual Camera Test',
         settings: 'Settings',
       },
       settings: {
@@ -234,6 +237,7 @@ export const translationResources = {
         flashIndicator: 'Show Flash Indicator',
         aiScene: 'AI Scene Detection',
         captureAnalytics: 'Capture Analytics',
+        nativeCameraPipeline: 'Native Dual Camera Test',
       },
       displayPanel: {
         title: 'Display',
@@ -360,6 +364,16 @@ export const translationResources = {
         version: 'バージョン',
         unsupported: '未対応',
       },
+      menu: {
+        professional: 'プロモード',
+        display: '表示とUI',
+        filters: 'フィルター',
+        aiEnhance: 'AI補正',
+        gallery: 'アルバム',
+        analytics: '撮影統計',
+        nativeCameraTest: 'ネイティブ双カメラテスト',
+        settings: '設定',
+      },
       settings: {
         title: '設定',
         captureSection: '撮影',
@@ -370,6 +384,7 @@ export const translationResources = {
         aboutEntry: 'アプリについて',
         languageEntry: 'アプリの言語',
         languageAutoHint: '初期設定はシステム言語、手動切替に対応',
+        nativeCameraPipeline: 'ネイティブ双カメラテスト',
       },
       aboutPanel: {
         title: 'アプリについて',
@@ -390,6 +405,16 @@ export const translationResources = {
         version: '버전',
         unsupported: '지원 안 됨',
       },
+      menu: {
+        professional: '프로 모드',
+        display: '표시 및 화면',
+        filters: '필터',
+        aiEnhance: 'AI 향상',
+        gallery: '앨범',
+        analytics: '촬영 통계',
+        nativeCameraTest: '네이티브 듀얼 카메라 테스트',
+        settings: '설정',
+      },
       settings: {
         title: '설정',
         captureSection: '촬영',
@@ -400,6 +425,7 @@ export const translationResources = {
         aboutEntry: '앱 정보',
         languageEntry: '앱 언어',
         languageAutoHint: '기본적으로 시스템 언어를 따르며 수동 전환 가능',
+        nativeCameraPipeline: '네이티브 듀얼 카메라 테스트',
       },
       aboutPanel: {
         title: '정보',
@@ -420,6 +446,16 @@ export const translationResources = {
         version: 'Version',
         unsupported: 'Non pris en charge',
       },
+      menu: {
+        professional: 'Mode pro',
+        display: 'Affichage et interface',
+        filters: 'Filtres',
+        aiEnhance: 'Amélioration IA',
+        gallery: 'Galerie',
+        analytics: 'Statistiques',
+        nativeCameraTest: 'Test double caméra natif',
+        settings: 'Réglages',
+      },
       settings: {
         title: 'Réglages',
         captureSection: 'Capture',
@@ -431,6 +467,7 @@ export const translationResources = {
         languageEntry: "Langue de l'application",
         languageAutoHint:
           'Suit le système par défaut, changement manuel pris en charge',
+        nativeCameraPipeline: 'Test double caméra natif',
       },
       aboutPanel: {
         title: 'À propos',
@@ -451,6 +488,16 @@ export const translationResources = {
         version: 'Versión',
         unsupported: 'No compatible',
       },
+      menu: {
+        professional: 'Modo pro',
+        display: 'Pantalla e interfaz',
+        filters: 'Filtros',
+        aiEnhance: 'Mejora con IA',
+        gallery: 'Galería',
+        analytics: 'Estadísticas',
+        nativeCameraTest: 'Prueba de doble cámara nativa',
+        settings: 'Ajustes',
+      },
       settings: {
         title: 'Ajustes',
         captureSection: 'Captura',
@@ -462,6 +509,7 @@ export const translationResources = {
         languageEntry: 'Idioma de la app',
         languageAutoHint:
           'Sigue el sistema por defecto y permite cambio manual',
+        nativeCameraPipeline: 'Prueba de doble cámara nativa',
       },
       aboutPanel: {
         title: 'Acerca de',
@@ -482,6 +530,16 @@ export const translationResources = {
         version: 'الإصدار',
         unsupported: 'غير مدعوم',
       },
+      menu: {
+        professional: 'الوضع الاحترافي',
+        display: 'العرض والواجهة',
+        filters: 'الفلاتر',
+        aiEnhance: 'تحسينات الذكاء الاصطناعي',
+        gallery: 'المعرض',
+        analytics: 'إحصاءات التصوير',
+        nativeCameraTest: 'اختبار الكاميرا المزدوجة الأصلية',
+        settings: 'الإعدادات',
+      },
       settings: {
         title: 'الإعدادات',
         captureSection: 'التقاط',
@@ -492,6 +550,7 @@ export const translationResources = {
         aboutEntry: 'حول التطبيق',
         languageEntry: 'لغة التطبيق',
         languageAutoHint: 'يتبع لغة النظام افتراضيًا مع دعم التبديل اليدوي',
+        nativeCameraPipeline: 'اختبار الكاميرا المزدوجة الأصلية',
       },
       aboutPanel: {
         title: 'حول',

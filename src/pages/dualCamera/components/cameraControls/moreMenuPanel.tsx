@@ -13,6 +13,7 @@ export const MoreMenuPanel = ({
   onOpenFilter,
   onOpenAi,
   onOpenAnalytics,
+  onOpenNativeCameraTest,
   onOpenGallery,
   onOpenSettings,
 }: {
@@ -23,6 +24,7 @@ export const MoreMenuPanel = ({
   onOpenFilter: () => void
   onOpenAi: () => void
   onOpenAnalytics: () => void
+  onOpenNativeCameraTest: () => void
   onOpenGallery: () => void
   onOpenSettings: () => void
 }) => {
@@ -92,6 +94,17 @@ export const MoreMenuPanel = ({
         }
         label={t('menu.analytics')}
         onPress={onOpenAnalytics}
+      />
+      <MenuItem
+        icon={
+          <MaterialIcons
+            name="science"
+            color="rgba(255,255,255,0.9)"
+            size={21}
+          />
+        }
+        label={t('menu.nativeCameraTest')}
+        onPress={onOpenNativeCameraTest}
       />
       <MenuItem
         icon={

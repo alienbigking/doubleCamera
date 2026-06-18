@@ -4,6 +4,15 @@
 
 ## 技术架构
 
+## 原生相机集成经验
+
+- 对于普通原生 UI，`requireNativeComponent(...)` 嵌入 React Native 视图树通常没有问题；但相机、地图、视频预览、Metal/GL/AVFoundation 这类强依赖原生生命周期、图层和硬件资源的组件，不应默认走嵌入式 `UIView` 路线。
+- 本项目已经验证：将相机预览作为 RN 页面内的原生 `UIView` 挂载时，容易受到 Fabric/RN 的挂载、布局、属性同步、窗口附着时机影响，导致会话启动时序不稳定，出现闪退或黑屏。
+- 当前稳定路线是：React Native 页面只负责调度，真正的相机界面由原生 `UIViewController` 全屏承载和管理。也就是：
+  `React Native -> Native Module -> present(UIViewController) -> AVCaptureSession/AVCaptureMultiCamSession`
+- 后续新增原生双摄、小窗预览、拍照合成、录像等能力，都应优先在 `UIViewController` 路线内扩展，不再回到之前那条嵌入式原生 `UIView` 方案。
+- 只有在一个原生相机 `UIViewController` 版本已经完全稳定，并且确实有必要把某些轻量 UI 回嵌到 RN 视图树时，才考虑重新评估 `requireNativeComponent`，且要将相机预览本体与普通 RN 布局解耦。
+
 ### 核心技术栈
 - **框架**: React Native 0.83+ with TypeScript 5.0+
 - **状态管理**: Zustand 4.4+ (轻量级状态管理)

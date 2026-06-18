@@ -268,6 +268,7 @@ final class DualVideoComposer: NSObject {
 
     let mainGeometry = primaryCamera == "front" ? frontGeometry : rearGeometry
     let insetGeometry = primaryCamera == "front" ? rearGeometry : frontGeometry
+    let insetReaderOutput = primaryCamera == "front" ? rearOutput : frontOutput
     var frameCount = 0
 
     while writer.status == .writing,
@@ -275,17 +276,59 @@ final class DualVideoComposer: NSObject {
       frontReader.status == .reading {
       guard
         let rearSample = rearOutput.copyNextSampleBuffer(),
-        let frontSample = frontOutput.copyNextSampleBuffer(),
-        let mainBuffer = CMSampleBufferGetImageBuffer(primaryCamera == "front" ? frontSample : rearSample),
-        let insetBuffer = CMSampleBufferGetImageBuffer(primaryCamera == "front" ? rearSample : frontSample)
+        let frontSample = frontOutput.copyNextSampleBuffer()
       else {
         break
       }
 
-      let presentationTime = CMSampleBufferGetPresentationTimeStamp(
-        primaryCamera == "front" ? frontSample : rearSample
-      )
+      var mainSample = primaryCamera == "front" ? frontSample : rearSample
+      var insetSample = primaryCamera == "front" ? rearSample : frontSample
+
+      guard
+        let mainBuffer = CMSampleBufferGetImageBuffer(mainSample),
+        let insetBuffer = CMSampleBufferGetImageBuffer(insetSample)
+      else {
+        break
+      }
+
+      let presentationTime = CMSampleBufferGetPresentationTimeStamp(mainSample)
       if presentationTime > duration {
+        break
+      }
+
+      if CMTimeGetSeconds(presentationTime) < 2.5 {
+        var currentInsetBuffer = insetBuffer
+        var skippedBlackInsetFrames = 0
+        while skippedBlackInsetFrames < 90 {
+          let insetProbeImage = normalizedTrackImage(
+            from: currentInsetBuffer,
+            geometry: insetGeometry
+          )
+          if !isMostlyBlack(insetProbeImage, context: context) {
+            break
+          }
+          guard let nextInsetSample = insetReaderOutput.copyNextSampleBuffer(),
+            let nextInsetBuffer = CMSampleBufferGetImageBuffer(nextInsetSample) else {
+            break
+          }
+          insetSample = nextInsetSample
+          currentInsetBuffer = nextInsetBuffer
+          skippedBlackInsetFrames += 1
+        }
+
+        if skippedBlackInsetFrames > 0 {
+          NSLog(
+            "DualVideoComposer skipped black inset frames=%ld at time=%.3f",
+            skippedBlackInsetFrames,
+            CMTimeGetSeconds(presentationTime)
+          )
+        }
+      }
+
+      guard
+        let resolvedMainBuffer = CMSampleBufferGetImageBuffer(mainSample),
+        let resolvedInsetBuffer = CMSampleBufferGetImageBuffer(insetSample)
+      else {
         break
       }
 
@@ -318,23 +361,23 @@ final class DualVideoComposer: NSObject {
       autoreleasepool {
         let background = CIImage(color: .black).cropped(to: outputRect)
         let mainImage = renderImage(
-          from: mainBuffer,
+          from: resolvedMainBuffer,
           geometry: mainGeometry,
           destination: mainDestination,
           outputSize: outputSize
         )
         let rawInsetImage = renderImage(
-          from: insetBuffer,
+          from: resolvedInsetBuffer,
           geometry: insetGeometry,
           destination: insetDestination,
           outputSize: outputSize
         )
         let insetImage = clipPipImage(rawInsetImage, maskImage: pipMaskImage, outputSize: outputSize)
         if frameCount == 0 {
-          let mainRawImage = CIImage(cvPixelBuffer: mainBuffer)
-          let insetRawImage = CIImage(cvPixelBuffer: insetBuffer)
-          let mainNormalizedImage = normalizedTrackImage(from: mainBuffer, geometry: mainGeometry)
-          let insetNormalizedImage = normalizedTrackImage(from: insetBuffer, geometry: insetGeometry)
+          let mainRawImage = CIImage(cvPixelBuffer: resolvedMainBuffer)
+          let insetRawImage = CIImage(cvPixelBuffer: resolvedInsetBuffer)
+          let mainNormalizedImage = normalizedTrackImage(from: resolvedMainBuffer, geometry: mainGeometry)
+          let insetNormalizedImage = normalizedTrackImage(from: resolvedInsetBuffer, geometry: insetGeometry)
           let composedImage = composeLayers(
             mainImage: mainImage,
             insetImage: insetImage,
@@ -611,9 +654,8 @@ final class DualVideoComposer: NSObject {
       orientedImage = trackOrientedImage
     }
 
-    let displayImage = orientedImage.oriented(.down)
-    let orientedExtent = displayImage.extent
-    let normalizedImage = displayImage.transformed(
+    let orientedExtent = orientedImage.extent
+    let normalizedImage = orientedImage.transformed(
       by: CGAffineTransform(translationX: -orientedExtent.minX, y: -orientedExtent.minY)
     )
     return normalizedImage.settingAlphaOne(in: CGRect(origin: .zero, size: normalizedImage.extent.size))
@@ -646,6 +688,37 @@ final class DualVideoComposer: NSObject {
       colorSpace: CGColorSpaceCreateDeviceRGB()
     )
     return "r:\(bitmap[0]) g:\(bitmap[1]) b:\(bitmap[2]) a:\(bitmap[3])"
+  }
+
+  private func isMostlyBlack(_ image: CIImage, context: CIContext) -> Bool {
+    let extent = image.extent
+    guard extent.width > 0, extent.height > 0 else {
+      return true
+    }
+
+    let filter = CIFilter(
+      name: "CIAreaAverage",
+      parameters: [
+        kCIInputImageKey: image,
+        kCIInputExtentKey: CIVector(cgRect: extent),
+      ]
+    )
+    guard let output = filter?.outputImage else {
+      return false
+    }
+
+    var bitmap = [UInt8](repeating: 0, count: 4)
+    context.render(
+      output,
+      toBitmap: &bitmap,
+      rowBytes: 4,
+      bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
+      format: .RGBA8,
+      colorSpace: CGColorSpaceCreateDeviceRGB()
+    )
+
+    let brightness = Int(bitmap[0]) + Int(bitmap[1]) + Int(bitmap[2])
+    return brightness < 18
   }
 
   private func writeDebugImage(
