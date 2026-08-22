@@ -1,4 +1,5 @@
 import AVFoundation
+import os
 import React
 import UIKit
 
@@ -445,6 +446,10 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
 
   private let sessionQueue = DispatchQueue(label: "com.doubleCamera.nativeCamera.session")
   private let videoOutputQueue = DispatchQueue(label: "com.doubleCamera.nativeCamera.videoOutput")
+  private static let performanceLog = OSLog(
+    subsystem: "com.skqy.doublecamera.app",
+    category: "DualVideo"
+  )
   private var session: AVCaptureSession?
   private var rearDeviceInput: AVCaptureDeviceInput?
   private var frontDeviceInput: AVCaptureDeviceInput?
@@ -473,6 +478,20 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
   private var _isRecording = false
   private var rearRecordingURL: URL?
   private var frontRecordingURL: URL?
+  private var recordingStartedAt: CFAbsoluteTime?
+  private var recordingSignpostID: OSSignpostID?
+  private var rearWrittenFrameCount = 0
+  private var frontWrittenFrameCount = 0
+  private var rearDroppedFrameCount = 0
+  private var frontDroppedFrameCount = 0
+  private var rearFirstFrameTime: CMTime?
+  private var frontFirstFrameTime: CMTime?
+  private var rearLastFrameTime: CMTime?
+  private var frontLastFrameTime: CMTime?
+  private var rearWarmupFrameCount = 0
+  private var frontWarmupFrameCount = 0
+  private var rearTimelineCandidate: CMTime?
+  private var frontTimelineCandidate: CMTime?
   private var isConfigured = false
   private var isRunning = false
   private var isStarting = false
@@ -599,7 +618,11 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
   }
 
   deinit {
-    stop()
+    rearAssetWriter?.cancelWriting()
+    frontAssetWriter?.cancelWriting()
+    [rearRecordingURL, frontRecordingURL].compactMap { $0 }.forEach {
+      try? FileManager.default.removeItem(at: $0)
+    }
   }
 
   override func didMoveToWindow() {
@@ -648,11 +671,17 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       self.hasEmittedPreviewReady = false
       self.hasEmittedStableReady = false
 
+      self.isRecording = false
+      self.videoOutputQueue.sync {}
+      self.cancelRecordingAndDeleteTemporaryFiles()
+
       if self.session?.isRunning == true {
         self.session?.stopRunning()
       }
 
       self.isRunning = false
+      self.latestRearPixelBuffer = nil
+      self.latestFrontPixelBuffer = nil
     }
   }
 
@@ -704,15 +733,30 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       return
     }
 
+    let microphoneStatus = AVCaptureDevice.authorizationStatus(for: .audio)
+    if microphoneStatus == .notDetermined {
+      AVCaptureDevice.requestAccess(for: .audio) { [weak self] _ in
+        self?.sessionQueue.async {
+          self?.isStarting = false
+          self?.startIfPossible()
+        }
+      }
+      return
+    }
+
     guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else {
       emitError("Rear camera is unavailable.")
       return
     }
 
+    audioDeviceInput = nil
+    audioDataOutput = nil
     if AVCaptureMultiCamSession.isMultiCamSupported, configureDualCameraSession(rearDevice: device) {
       return
     }
 
+    audioDeviceInput = nil
+    audioDataOutput = nil
     configureSingleCameraSession(rearDevice: device)
   }
 
@@ -721,17 +765,19 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       let input = try AVCaptureDeviceInput(device: rearDevice)
       let newSession = AVCaptureSession()
       newSession.beginConfiguration()
+      defer { newSession.commitConfiguration() }
       if newSession.canSetSessionPreset(.high) {
         newSession.sessionPreset = .high
       }
 
       guard newSession.canAddInput(input) else {
-        newSession.commitConfiguration()
         emitError("Cannot add rear camera input.")
         return
       }
 
       newSession.addInput(input)
+
+      configureAudioCaptureIfAuthorized(to: newSession)
 
       let output = AVCaptureVideoDataOutput()
       output.alwaysDiscardsLateVideoFrames = true
@@ -741,7 +787,6 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       output.setSampleBufferDelegate(self, queue: videoOutputQueue)
 
       guard newSession.canAddOutput(output) else {
-        newSession.commitConfiguration()
         emitError("Cannot add rear camera output.")
         return
       }
@@ -751,8 +796,6 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
          connection.isVideoOrientationSupported {
         connection.videoOrientation = .portrait
       }
-
-      newSession.commitConfiguration()
 
       let layer = AVCaptureVideoPreviewLayer(session: newSession)
       layer.videoGravity = .resizeAspectFill
@@ -807,6 +850,8 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
 
       multiCamSession.addInputWithNoConnections(rearInput)
       multiCamSession.addInputWithNoConnections(frontInput)
+
+      configureAudioCaptureIfAuthorized(to: multiCamSession)
 
       guard
         let rearPort = rearInput.ports(for: .video, sourceDeviceType: rearDevice.deviceType, sourceDevicePosition: .back).first,
@@ -908,6 +953,50 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
     } catch {
       emitError("Configure native dual camera failed: \(error.localizedDescription)")
       return false
+    }
+  }
+
+  private func configureAudioCaptureIfAuthorized(to captureSession: AVCaptureSession) {
+    guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else { return }
+    guard let microphone = AVCaptureDevice.default(for: .audio) else { return }
+
+    do {
+      let input = try AVCaptureDeviceInput(device: microphone)
+      let output = AVCaptureAudioDataOutput()
+      output.setSampleBufferDelegate(self, queue: videoOutputQueue)
+
+      guard captureSession.canAddInput(input), captureSession.canAddOutput(output) else {
+        NSLog("NativeDualCameraView audio capture is unavailable for this session")
+        return
+      }
+
+      if let multiCamSession = captureSession as? AVCaptureMultiCamSession {
+        multiCamSession.addInputWithNoConnections(input)
+        multiCamSession.addOutputWithNoConnections(output)
+
+        guard let audioPort = input.ports.first(where: { $0.mediaType == .audio }) else {
+          multiCamSession.removeOutput(output)
+          multiCamSession.removeInput(input)
+          return
+        }
+
+        let connection = AVCaptureConnection(inputPorts: [audioPort], output: output)
+        guard multiCamSession.canAddConnection(connection) else {
+          multiCamSession.removeOutput(output)
+          multiCamSession.removeInput(input)
+          NSLog("NativeDualCameraView cannot connect microphone output")
+          return
+        }
+        multiCamSession.addConnection(connection)
+      } else {
+        captureSession.addInput(input)
+        captureSession.addOutput(output)
+      }
+
+      audioDeviceInput = input
+      audioDataOutput = output
+    } catch {
+      NSLog("NativeDualCameraView microphone setup failed: %@", error.localizedDescription)
     }
   }
 
@@ -1202,7 +1291,7 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       }
 
       let resolutionLabel = (options["resolution"] as? String) ?? "1080p"
-      let frameRate = Int(truncating: options["frameRate"] as? NSNumber ?? 30)
+      let frameRate = 30
       let audioEnabled = options["audioEnabled"] as? Bool ?? false
       let audioChannels = Int(truncating: options["audioChannels"] as? NSNumber ?? 2)
       let audioSampleRate = Double(truncating: options["audioSampleRate"] as? NSNumber ?? 48_000)
@@ -1219,12 +1308,26 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
           audioChannels: audioChannels,
           audioSampleRate: audioSampleRate
         )
+        let signpostID = OSSignpostID(log: Self.performanceLog)
+        self.recordingSignpostID = signpostID
+        self.recordingStartedAt = CFAbsoluteTimeGetCurrent()
+        self.resetRecordingMetrics()
+        os_signpost(
+          .begin,
+          log: Self.performanceLog,
+          name: "Record",
+          signpostID: signpostID,
+          "resolution=%{public}@ fps=%ld audio=%{public}@",
+          resolutionLabel,
+          frameRate,
+          audioEnabled.description
+        )
         self.isRecording = true
         self.recordingStartTime = .zero
         self.recordingTimelineOrigin = nil
         resolve(nil)
       } catch {
-        self.resetRecordingState()
+        self.cancelRecordingAndDeleteTemporaryFiles()
         reject("native_camera_start_recording_failed", error.localizedDescription, error)
       }
     }
@@ -1242,16 +1345,31 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       }
 
       self.isRecording = false
+      self.videoOutputQueue.sync {}
       let rearWriter = self.rearAssetWriter
       let frontWriter = self.frontAssetWriter
       let rearURL = self.rearRecordingURL
       let frontURL = self.frontRecordingURL
+      let elapsed = self.recordingStartedAt.map { CFAbsoluteTimeGetCurrent() - $0 } ?? 0
+      let frameDuration = CMTime(value: 1, timescale: 30)
+      let wallClockEndTime = CMTime(
+        seconds: max(elapsed, 0) + CMTimeGetSeconds(frameDuration),
+        preferredTimescale: 600
+      )
+      let rearEndTime = self.rearLastFrameTime.map {
+        min(CMTimeAdd($0, frameDuration), wallClockEndTime)
+      } ?? wallClockEndTime
+      let frontEndTime = self.frontLastFrameTime.map {
+        min(CMTimeAdd($0, frameDuration), wallClockEndTime)
+      } ?? wallClockEndTime
 
       if rearWriter?.status == .writing {
+        rearWriter?.endSession(atSourceTime: rearEndTime)
         self.rearAssetWriterInput?.markAsFinished()
         self.rearAudioWriterInput?.markAsFinished()
       }
       if frontWriter?.status == .writing {
+        frontWriter?.endSession(atSourceTime: frontEndTime)
         self.frontAssetWriterInput?.markAsFinished()
         self.frontAudioWriterInput?.markAsFinished()
       }
@@ -1283,9 +1401,24 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
 
       let rearPath = rearURL?.path
       let frontPath = frontURL?.path
+      let rearFrames = self.rearWrittenFrameCount
+      let frontFrames = self.frontWrittenFrameCount
+      let rearDropped = self.rearDroppedFrameCount
+      let frontDropped = self.frontDroppedFrameCount
+      let startDeltaMs = self.frameDeltaMilliseconds(
+        self.rearFirstFrameTime,
+        self.frontFirstFrameTime
+      )
+      let endDeltaMs = self.frameDeltaMilliseconds(
+        self.rearLastFrameTime,
+        self.frontLastFrameTime
+      )
       self.resetRecordingState()
 
       if let finishError {
+        [rearURL, frontURL].compactMap { $0 }.forEach {
+          try? FileManager.default.removeItem(at: $0)
+        }
         reject("native_camera_stop_recording_failed", finishError.localizedDescription, finishError)
         return
       }
@@ -1297,6 +1430,31 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       if let frontPath {
         payload.append(["side": "front", "filePath": frontPath])
       }
+
+      let rearBytes = rearPath.flatMap { path -> Int64? in
+        guard let value = try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber else {
+          return nil
+        }
+        return value.int64Value
+      } ?? 0
+      let frontBytes = frontPath.flatMap { path -> Int64? in
+        guard let value = try? FileManager.default.attributesOfItem(atPath: path)[.size] as? NSNumber else {
+          return nil
+        }
+        return value.int64Value
+      } ?? 0
+      NSLog(
+        "DualVideo recording duration=%.2fs rearFrames=%ld frontFrames=%ld rearDropped=%ld frontDropped=%ld startDelta=%.1fms endDelta=%.1fms rear=%.1fMB front=%.1fMB",
+        elapsed,
+        rearFrames,
+        frontFrames,
+        rearDropped,
+        frontDropped,
+        startDeltaMs,
+        endDeltaMs,
+        Double(rearBytes) / 1_048_576,
+        Double(frontBytes) / 1_048_576
+      )
 
       resolve(payload)
     }
@@ -1405,8 +1563,6 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
     switch resolution.lowercased() {
     case "720p":
       return CGSize(width: 720, height: 1280)
-    case "4k":
-      return CGSize(width: 2160, height: 3840)
     default:
       return CGSize(width: 1080, height: 1920)
     }
@@ -1529,35 +1685,11 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
   }
 
   private func ensureAudioCaptureConfigured() throws {
-    guard audioDataOutput == nil || audioDeviceInput == nil else { return }
-    guard let session else {
-      throw composerError("Camera session is unavailable for audio capture.")
+    guard AVCaptureDevice.authorizationStatus(for: .audio) == .authorized else {
+      throw composerError("Microphone permission is not authorized.")
     }
-    guard let microphone = AVCaptureDevice.default(for: .audio) else {
-      throw composerError("Microphone is unavailable.")
-    }
-
-    let input = try AVCaptureDeviceInput(device: microphone)
-    let output = AVCaptureAudioDataOutput()
-    output.setSampleBufferDelegate(self, queue: videoOutputQueue)
-
-    session.beginConfiguration()
-    defer { session.commitConfiguration() }
-
-    if audioDeviceInput == nil {
-      guard session.canAddInput(input) else {
-        throw composerError("Cannot add microphone input.")
-      }
-      session.addInput(input)
-      audioDeviceInput = input
-    }
-
-    if audioDataOutput == nil {
-      guard session.canAddOutput(output) else {
-        throw composerError("Cannot add microphone output.")
-      }
-      session.addOutput(output)
-      audioDataOutput = output
+    guard audioDataOutput != nil, audioDeviceInput != nil else {
+      throw composerError("Microphone capture is not ready.")
     }
   }
 
@@ -1583,12 +1715,13 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       writer.startSession(atSourceTime: .zero)
     }
 
-    let timelineOrigin: CMTime
-    if let existingOrigin = recordingTimelineOrigin {
-      timelineOrigin = existingOrigin
-    } else {
-      recordingTimelineOrigin = presentationTime
-      timelineOrigin = presentationTime
+    guard let timelineOrigin = resolveRecordingTimelineOrigin(
+      for: side,
+      sampleBuffer: sampleBuffer,
+      presentationTime: presentationTime
+    ) else {
+      recordDroppedFrame(side: side)
+      return
     }
 
     let relativeTime = CMTimeSubtract(presentationTime, timelineOrigin)
@@ -1596,11 +1729,26 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       return
     }
 
+    // Camera timestamps must stay inside the real recording window. This also
+    // prevents a timestamp discontinuity from making a 5-second clip longer.
+    if let recordingStartedAt {
+      let elapsed = CFAbsoluteTimeGetCurrent() - recordingStartedAt
+      let allowedEnd = CMTime(
+        seconds: max(elapsed, 0) + (1.0 / 30.0),
+        preferredTimescale: 600
+      )
+      guard relativeTime <= allowedEnd else {
+        recordDroppedFrame(side: side)
+        return
+      }
+    }
+
     if recordingStartTime == nil || recordingStartTime == .zero {
       recordingStartTime = relativeTime
     }
 
     guard writer.status == .writing, writerInput.isReadyForMoreMediaData else {
+      recordDroppedFrame(side: side)
       return
     }
 
@@ -1608,6 +1756,7 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       from: sampleBuffer,
       presentationTime: relativeTime
     ) else {
+      recordDroppedFrame(side: side)
       NSLog(
         "NativeDualCameraView retime sample buffer failed. side=%@ relative=%.3f",
         side,
@@ -1616,7 +1765,10 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
       return
     }
 
-    if !writerInput.append(retimedSampleBuffer) {
+    if writerInput.append(retimedSampleBuffer) {
+      recordWrittenFrame(side: side, presentationTime: relativeTime)
+    } else {
+      recordDroppedFrame(side: side)
       NSLog(
         "NativeDualCameraView append sample buffer failed. side=%@ status=%ld error=%@ relative=%.3f",
         side,
@@ -1725,6 +1877,9 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
   }
 
   private func resetRecordingState() {
+    if let signpostID = recordingSignpostID {
+      os_signpost(.end, log: Self.performanceLog, name: "Record", signpostID: signpostID)
+    }
     rearAssetWriter = nil
     frontAssetWriter = nil
     rearAssetWriterInput = nil
@@ -1737,7 +1892,135 @@ final class NativeDualCameraView: UIView, AVCaptureVideoDataOutputSampleBufferDe
     frontRecordingURL = nil
     recordingStartTime = nil
     recordingTimelineOrigin = nil
+    recordingStartedAt = nil
+    recordingSignpostID = nil
+    resetRecordingMetrics()
     isRecording = false
+  }
+
+  private func resetRecordingMetrics() {
+    rearWrittenFrameCount = 0
+    frontWrittenFrameCount = 0
+    rearDroppedFrameCount = 0
+    frontDroppedFrameCount = 0
+    rearFirstFrameTime = nil
+    frontFirstFrameTime = nil
+    rearLastFrameTime = nil
+    frontLastFrameTime = nil
+    rearWarmupFrameCount = 0
+    frontWarmupFrameCount = 0
+    rearTimelineCandidate = nil
+    frontTimelineCandidate = nil
+  }
+
+  private func resolveRecordingTimelineOrigin(
+    for side: String,
+    sampleBuffer: CMSampleBuffer,
+    presentationTime: CMTime
+  ) -> CMTime? {
+    if let origin = recordingTimelineOrigin {
+      return origin
+    }
+
+    let warmupFrameTarget = 3
+    if side == "rear" {
+      rearWarmupFrameCount += 1
+      guard rearWarmupFrameCount >= warmupFrameTarget else { return nil }
+      guard isUsableOpeningFrame(sampleBuffer) else { return nil }
+      rearTimelineCandidate = rearTimelineCandidate ?? presentationTime
+    } else {
+      frontWarmupFrameCount += 1
+      guard frontWarmupFrameCount >= warmupFrameTarget else { return nil }
+      guard isUsableOpeningFrame(sampleBuffer) else { return nil }
+      frontTimelineCandidate = frontTimelineCandidate ?? presentationTime
+    }
+
+    let origin: CMTime
+    if isDualCameraActive {
+      guard let rearTimelineCandidate, let frontTimelineCandidate else { return nil }
+      origin = CMTimeCompare(rearTimelineCandidate, frontTimelineCandidate) >= 0
+        ? rearTimelineCandidate
+        : frontTimelineCandidate
+    } else {
+      guard let rearTimelineCandidate else { return nil }
+      origin = rearTimelineCandidate
+    }
+
+    recordingTimelineOrigin = origin
+    return origin
+  }
+
+  private func isUsableOpeningFrame(_ sampleBuffer: CMSampleBuffer) -> Bool {
+    guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return false }
+    CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+    guard let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else { return false }
+    let width = CVPixelBufferGetWidth(pixelBuffer)
+    let height = CVPixelBufferGetHeight(pixelBuffer)
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+    guard width > 0, height > 0, bytesPerRow >= width * 4 else { return false }
+
+    let bytes = baseAddress.assumingMemoryBound(to: UInt8.self)
+    let sampleColumns = 8
+    let sampleRows = 8
+    var brightnessTotal = 0
+    for row in 0..<sampleRows {
+      let y = min(height - 1, (row * 2 + 1) * height / (sampleRows * 2))
+      for column in 0..<sampleColumns {
+        let x = min(width - 1, (column * 2 + 1) * width / (sampleColumns * 2))
+        let offset = y * bytesPerRow + x * 4
+        brightnessTotal += Int(bytes[offset])
+        brightnessTotal += Int(bytes[offset + 1])
+        brightnessTotal += Int(bytes[offset + 2])
+      }
+    }
+
+    let channelCount = sampleColumns * sampleRows * 3
+    return brightnessTotal / channelCount >= 4
+  }
+
+  private func recordWrittenFrame(side: String, presentationTime: CMTime) {
+    if side == "rear" {
+      rearWrittenFrameCount += 1
+      rearFirstFrameTime = rearFirstFrameTime ?? presentationTime
+      rearLastFrameTime = presentationTime
+    } else {
+      frontWrittenFrameCount += 1
+      frontFirstFrameTime = frontFirstFrameTime ?? presentationTime
+      frontLastFrameTime = presentationTime
+    }
+  }
+
+  private func recordDroppedFrame(side: String) {
+    if side == "rear" {
+      rearDroppedFrameCount += 1
+    } else {
+      frontDroppedFrameCount += 1
+    }
+  }
+
+  private func frameDeltaMilliseconds(_ first: CMTime?, _ second: CMTime?) -> Double {
+    guard let first, let second, first.isValid, second.isValid else { return -1 }
+    return abs(CMTimeGetSeconds(CMTimeSubtract(first, second))) * 1_000
+  }
+
+  private func cancelRecordingAndDeleteTemporaryFiles() {
+    let wasRecording = isRecording || rearAssetWriter != nil || frontAssetWriter != nil
+    let urls = [rearRecordingURL, frontRecordingURL].compactMap { $0 }
+
+    isRecording = false
+    rearAssetWriter?.cancelWriting()
+    frontAssetWriter?.cancelWriting()
+    resetRecordingState()
+
+    urls.forEach {
+      try? FileManager.default.removeItem(at: $0)
+    }
+
+    if wasRecording {
+      NSLog("DualVideo recording cancelled and temporary files removed")
+    }
   }
 
   private func scheduleStableReadyIfNeeded() {

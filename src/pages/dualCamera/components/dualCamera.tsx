@@ -184,7 +184,6 @@ const videoFrameRateOptionsByResolution: Record<
 > = {
   '720p': [24, 30, 60],
   '1080p': [24, 30, 60],
-  '4k': [24, 30],
 }
 const audioSampleRateByQuality: Record<AudioQualityMode, number> = {
   standard: 22_050,
@@ -202,10 +201,6 @@ const videoResolutionConfig: Record<
   '1080p': {
     label: '1080p',
     resolution: CommonResolutions.FHD_16_9,
-  },
-  '4k': {
-    label: '4K',
-    resolution: CommonResolutions.UHD_16_9,
   },
 }
 const defaultProfessionalISO = 120
@@ -269,9 +264,7 @@ const getVideoTargetBitRate = (
   quality: AudioQualityMode,
 ) => {
   const baseBitRate =
-    resolution === '4k'
-      ? 28_000_000
-      : resolution === '1080p'
+    resolution === '1080p'
       ? 12_000_000
       : 7_000_000
   const frameMultiplier = frameRate >= 60 ? 1.45 : frameRate === 24 ? 0.9 : 1
@@ -292,7 +285,7 @@ const buildVideoOutputConfig = ({
   audioChannelMode: AudioChannelMode
   audioQualityMode: AudioQualityMode
 }) => {
-  const enableHigherResolutionCodecs = resolution === '4k' || frameRate >= 60
+  const enableHigherResolutionCodecs = frameRate >= 60
   const enableVideoAudio = audioChannelMode !== 'off'
   const targetBitRate = getVideoTargetBitRate(
     resolution,
@@ -335,7 +328,6 @@ const createEmptyCaptureAnalyticsStats = (): CaptureAnalyticsStats => {
     videoResolutionUsage: {
       '720p': 0,
       '1080p': 0,
-      '4k': 0,
     },
     videoSaveModeUsage: {
       combined: 0,
@@ -645,6 +637,7 @@ const DualCamera = () => {
   const sceneSignalsRef = useRef<SceneSignals>(createEmptySceneSignals())
   const recordersRef = useRef<Recorders>({})
   const recordingFinishedRef = useRef<Promise<RecordedVideo>[]>([])
+  const recordedVideoUrisRef = useRef<string[]>([])
   const captureBusyRef = useRef(false)
   const videoConfigurePromiseRef = useRef<Promise<boolean> | null>(null)
   const sessionStopPromiseRef = useRef<Promise<void> | null>(null)
@@ -1385,6 +1378,8 @@ const DualCamera = () => {
   const effectiveDualVideoComposeMode: DualVideoComposeMode =
     layout === 'split' ? 'split' : 'pip'
   const availableVideoFrameRates = (() => {
+    if (nativeDualCameraEnabled) return [30] as VideoFrameRateMode[]
+
     const preferredOptions = videoFrameRateOptionsByResolution[videoResolution]
     const pair = cameraPairRef.current
 
@@ -1404,13 +1399,6 @@ const DualCamera = () => {
   }, [filterRenderQuality])
 
   useEffect(() => {
-    if (videoResolution !== '4k') return
-
-    setVideoResolution('1080p')
-    setVideoCaptureReady(false)
-  }, [videoResolution])
-
-  useEffect(() => {
     if (availableVideoFrameRates.includes(videoFrameRate)) return
 
     const fallbackFrameRate = getPreferredVideoFrameRate(
@@ -1428,10 +1416,11 @@ const DualCamera = () => {
       ? t('common.rearPreview')
       : t('common.frontPreview')
   const previewStatusText = getCameraStatusText(previewStatus, previewError)
+  const localizedLensOptions = lensOptions.map(localizeLensOption)
   const selectedLens =
-    lensOptions.find(option => option.id === selectedLensId) ||
-    lensOptions[0] ||
-    defaultLensOptions[0]
+    localizedLensOptions.find(option => option.id === selectedLensId) ||
+    localizedLensOptions[0] ||
+    localizeLensOption(defaultLensOptions[0])
   const rearController = rearCameraControllerRef.current
   const supportsProfessionalExposure =
     Platform.OS === 'ios' && !!rearController?.device.supportsExposureLocking
@@ -2101,7 +2090,14 @@ const DualCamera = () => {
   }
 
   const selectVideoResolution = (value: VideoResolutionMode) => {
-    const resolvedResolution = value === '4k' ? '1080p' : value
+    const resolvedResolution = value
+    if (nativeDualCameraEnabled) {
+      setVideoResolution(resolvedResolution)
+      setVideoFrameRate(30)
+      setVideoCaptureReady(false)
+      showControlStatusMessage(`${resolvedResolution} 30fps 下次录像生效`)
+      return
+    }
     const nextFrameRates = videoFrameRateOptionsByResolution[
       resolvedResolution
     ].filter(fps => {
@@ -2782,6 +2778,7 @@ const DualCamera = () => {
   const captureNativePhoto = async () => {
     if (captureBusyRef.current) return
     captureBusyRef.current = true
+    let combinedUri: string | undefined
 
     const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
     const outputAspectRatio =
@@ -2817,7 +2814,7 @@ const DualCamera = () => {
         pipBorderVisible,
       })
 
-      const combinedUri =
+      combinedUri =
         typeof result === 'string' ? result : result.combinedUri
 
       if (!combinedUri) {
@@ -2836,12 +2833,12 @@ const DualCamera = () => {
         )
       }
       showSaveFeedback(saved ? 'saved' : 'failed')
-      await safeUnlinkFile(combinedUri)
     } catch (error) {
       console.warn('Native dual camera capture failed', error)
       trackCaptureAnalytics(() => trackCaptureFailure('photo'))
       showSaveFeedback('failed')
     } finally {
+      await safeUnlinkFile(combinedUri)
       captureBusyRef.current = false
       setCaptureBusy(false)
     }
@@ -3377,7 +3374,7 @@ const DualCamera = () => {
   ])
 
   const enterVideoMode = () => {
-    flashModeTransition(() => {
+    const switchMode = () => {
       setMode('video')
       if (nativeDualCameraEnabled) {
         if (previewStatus === 'ready') {
@@ -3391,7 +3388,13 @@ const DualCamera = () => {
         videoWarmupPendingRef.current = true
         showControlStatusMessage('正在准备录像')
       }
-    })
+    }
+
+    if (nativeDualCameraEnabled) {
+      switchMode()
+    } else {
+      void flashModeTransition(switchMode)
+    }
   }
 
   const togglePreviewLayout = () => {
@@ -3415,6 +3418,7 @@ const DualCamera = () => {
     if (!recording || recordingBusy) return
 
     if (nativeDualCameraEnabled) {
+      recordedVideoUrisRef.current = []
       try {
         const saveStartedAt = Date.now()
         setRecordingBusy(true)
@@ -3425,6 +3429,9 @@ const DualCamera = () => {
         }
 
         const videos = await NativeDualCameraController.stopVideoRecording()
+        recordedVideoUrisRef.current = videos.map(video =>
+          toFileUri(video.filePath),
+        )
         setRecording(false)
         setRecordingSeconds(0)
 
@@ -3543,14 +3550,15 @@ const DualCamera = () => {
         )
         showSaveFeedback(usedFallbackSave ? 'fallback' : 'saved')
 
-        await Promise.all(
-          videoFiles.map(video => safeUnlinkFile(video.uri)),
-        )
       } catch (error) {
         console.warn('Stop native dual video recording failed', error)
         trackCaptureAnalytics(() => trackCaptureFailure('video'))
         showSaveFeedback('failed')
       } finally {
+        await Promise.all(
+          recordedVideoUrisRef.current.map(uri => safeUnlinkFile(uri)),
+        )
+        recordedVideoUrisRef.current = []
         setRecording(false)
         setRecordingSeconds(0)
         setRecordingBusy(false)
@@ -3887,6 +3895,19 @@ const DualCamera = () => {
           />
         )}
 
+        {nativeDualCameraEnabled && isPip && (
+          <View
+            style={[
+              styles.nativePipGestureLayer,
+              {
+                left: pipPosition.x,
+                top: pipPosition.y,
+              },
+            ]}
+            {...pipPanResponder.panHandlers}
+          />
+        )}
+
         {!nativeDualCameraEnabled && isPip && (
           <View
             style={[
@@ -3969,7 +3990,7 @@ const DualCamera = () => {
         {panel === 'zoom' && (
           <LensPickerPanel
             top={insets.top + 68}
-            lensOptions={lensOptions}
+            lensOptions={localizedLensOptions}
             selectedLensId={selectedLensId}
             onSelectLens={selectLens}
           />
@@ -4086,10 +4107,15 @@ const DualCamera = () => {
               if (recording) {
                 stopVideoRecording()
               }
-              flashModeTransition(() => {
+              const switchMode = () => {
                 videoWarmupPendingRef.current = false
                 setMode('photo')
-              })
+              }
+              if (nativeDualCameraEnabled) {
+                switchMode()
+              } else {
+                void flashModeTransition(switchMode)
+              }
             }}
             onSetVideoMode={enterVideoMode}
             onToggleLayout={togglePreviewLayout}
@@ -4435,6 +4461,13 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 8,
+  },
+  nativePipGestureLayer: {
+    position: 'absolute',
+    width: pipSize.width,
+    height: pipSize.height,
+    borderRadius: pipCornerRadius,
+    zIndex: 4,
   },
   pipNoBorder: {
     padding: 0,

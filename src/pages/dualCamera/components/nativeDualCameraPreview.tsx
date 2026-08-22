@@ -73,7 +73,7 @@ type NativeDualCameraViewManagerModule = {
     y: number
   }) => Promise<void>
   startVideoRecording: (options: {
-    resolution: '720p' | '1080p' | '4k'
+    resolution: '720p' | '1080p'
     frameRate: number
     audioEnabled?: boolean
     audioChannels?: number
