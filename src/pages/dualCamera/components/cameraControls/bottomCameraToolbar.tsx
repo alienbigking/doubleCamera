@@ -8,6 +8,7 @@ import {
 } from 'react-native'
 import { MaterialIcons } from '@react-native-vector-icons/material-icons/static'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import Video from 'react-native-video'
 import type { CaptureMode } from './types'
 
 // 底部拍摄控制栏组件：承载模式切换、布局切换、快门、相册和更多入口。
@@ -30,6 +31,7 @@ export const BottomCameraToolbar = ({
   onFlipPrimaryCamera,
   onPressShutter,
   onToggleQuickPanel,
+  galleryPreview,
 }: {
   mode: CaptureMode
   layoutLabel: string
@@ -49,6 +51,11 @@ export const BottomCameraToolbar = ({
   onFlipPrimaryCamera: () => void
   onPressShutter: () => void
   onToggleQuickPanel: () => void
+  galleryPreview?: {
+    uri: string
+    type: 'photo' | 'video'
+    processing?: boolean
+  }
 }) => (
   <SafeAreaView pointerEvents="box-none" style={styles.bottomSafe}>
     <View
@@ -109,11 +116,34 @@ export const BottomCameraToolbar = ({
               activeOpacity={0.8}
               onPress={onOpenGallery}
             >
-              <MaterialIcons
-                name="photo-library"
-                color="rgba(255,255,255,0.9)"
-                size={26}
-              />
+              {galleryPreview?.type === 'photo' ||
+              (galleryPreview?.type === 'video' &&
+                !galleryPreview.processing) ? (
+                <Animated.Image
+                  source={{ uri: galleryPreview.uri }}
+                  style={styles.galleryPreviewImage}
+                />
+              ) : galleryPreview?.type === 'video' ? (
+                <Video
+                  source={{ uri: galleryPreview.uri }}
+                  paused
+                  muted
+                  resizeMode="cover"
+                  controls={false}
+                  style={styles.galleryPreviewImage}
+                />
+              ) : (
+                <MaterialIcons
+                  name="photo-library"
+                  color="rgba(255,255,255,0.9)"
+                  size={26}
+                />
+              )}
+              {galleryPreview?.processing ? (
+                <View style={styles.galleryPreviewProcessing}>
+                  <MaterialIcons name="hourglass-top" color="#fff" size={14} />
+                </View>
+              ) : null}
             </TouchableOpacity>
           ) : null}
         </View>
@@ -304,6 +334,22 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(23,24,27,0.78)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.13)',
+  },
+  galleryPreviewImage: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+  },
+  galleryPreviewProcessing: {
+    position: 'absolute',
+    right: 2,
+    bottom: 2,
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15,16,18,0.82)',
   },
   solidControl: {
     backgroundColor: '#17181b',

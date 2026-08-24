@@ -45,7 +45,7 @@ export type NativeDualCameraPhotoResult = {
 }
 
 export type NativeDualCameraRecordedVideo = {
-  side: 'rear' | 'front'
+  side: 'rear' | 'front' | 'combined'
   filePath: string
 }
 
@@ -78,6 +78,17 @@ type NativeDualCameraViewManagerModule = {
     audioEnabled?: boolean
     audioChannels?: number
     audioSampleRate?: number
+    saveMode: 'combined' | 'separate' | 'combinedAndSeparate'
+    layout: LayoutMode
+    primaryCamera: 'rear' | 'front'
+    pipX: number
+    pipY: number
+    pipWidth: number
+    pipHeight: number
+    previewWidth: number
+    previewHeight: number
+    aspectRatio: number
+    pipBorderVisible: boolean
   }) => Promise<void>
   stopVideoRecording: () => Promise<NativeDualCameraRecordedVideo[]>
 }
