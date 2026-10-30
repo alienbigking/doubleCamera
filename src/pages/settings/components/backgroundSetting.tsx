@@ -223,7 +223,7 @@ const BackgroundModalContent: React.FC<BackgroundModalContentProps> = ({
       setPreviewUri(`file://${destPath}?t=${Date.now()}`)
       setHomeBackgroundImagePath(destPath)
     } catch (e: any) {
-      console.error('[BackgroundModal] generate error:', e)
+      console.error('[背景设置] 生成背景失败：', e)
       setError(e?.message || '生成失败')
     } finally {
       setGenerating(false)

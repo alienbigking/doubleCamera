@@ -58,12 +58,12 @@ const Login = () => {
         identityType: loginMode === 'password' ? 'password' : 'code',
       })
 
-      console.log('登录响应内容', { status, data, message })
-      console.log('获取到的 token:', data?.accessToken)
+      console.log('登录响应状态', { status, message })
+      console.log('是否获取到令牌：', Boolean(data?.accessToken))
 
       if (status === 0) {
         setToken(data?.accessToken)
-        console.log('设置后的 store token:', useAuthRouteStore.getState().token)
+        console.log('状态中是否已保存令牌：', Boolean(useAuthRouteStore.getState().token))
         setLoggedIn(true)
         navigation.reset({ index: 0, routes: [{ name: 'Main' }] })
         Toast.success('登录成功！')

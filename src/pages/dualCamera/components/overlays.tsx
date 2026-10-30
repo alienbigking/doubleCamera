@@ -603,7 +603,7 @@ export const GalleryModal = ({
             },
       )
     } catch (error) {
-      console.warn('Share gallery assets failed', error)
+      console.warn('分享相册内容失败', error)
     } finally {
       setSharing(false)
     }
@@ -626,7 +626,7 @@ export const GalleryModal = ({
               await onDelete(selectedAssets)
               setSelectedAssetIds([])
             } catch (error) {
-              console.warn('Delete gallery assets failed', error)
+              console.warn('删除相册内容失败', error)
             } finally {
               setDeleting(false)
             }

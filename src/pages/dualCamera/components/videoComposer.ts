@@ -45,7 +45,7 @@ const stripFileScheme = (uri: string) =>
 const findVideoPath = (videos: RecordedVideo[], side: CameraSide) => {
   const video = videos.find(item => item.side === side)
   if (!video) {
-    throw new Error(`Missing ${side} video file.`)
+    throw new Error(`缺少${side}摄像头视频文件。`)
   }
   return stripFileScheme(video.filePath)
 }
@@ -63,11 +63,11 @@ export const composeDualVideo = async ({
 }: ComposeDualVideoOptions) => {
   if (Platform.OS !== 'ios') {
     throw new Error(
-      'Dual video composition is currently only implemented on iOS.',
+      '目前仅支持在 iOS 上合成双摄视频。',
     )
   }
   if (!nativeComposer?.composeDualVideo) {
-    throw new Error('DualVideoComposer native module is not available.')
+    throw new Error('原生双摄视频合成模块不可用。')
   }
 
   const aspectRatio =

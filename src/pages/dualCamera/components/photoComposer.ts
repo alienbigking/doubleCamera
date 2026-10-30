@@ -1,3 +1,4 @@
+// 双摄照片合成桥接：封装原生文件处理和照片合成能力。
 import RNFS from 'react-native-fs'
 import { NativeModules, Platform } from 'react-native'
 import {
@@ -87,7 +88,7 @@ const loadImage = async (uri: string): Promise<LoadedImage> => {
   }
 
   directData?.dispose()
-  throw new Error(`Failed to decode image without Base64 fallback: ${uri}`)
+  throw new Error(`图片解码失败，未启用 Base64 回退：${uri}`)
 }
 
 const fitCanvasSize = (
@@ -178,7 +179,7 @@ export const composeDualPhoto = async ({
     )
 
     if (!surface) {
-      throw new Error('Failed to create Skia offscreen surface')
+      throw new Error('创建 Skia 离屏画布失败')
     }
 
     let snapshot:

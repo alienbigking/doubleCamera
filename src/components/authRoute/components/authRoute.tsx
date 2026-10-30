@@ -34,7 +34,7 @@ const AuthRoute = ({
   }, [])
 
   useEffect(() => {
-    // console.log('AuthRoute: 状态变化', {
+    // console.log('登录路由：状态变化', {
     //   navReady,
     //   hydrated,
     //   isLoggedIn,
@@ -43,7 +43,7 @@ const AuthRoute = ({
     // 必须同时满足：导航容器就绪 + persist hydrate 完成
     if (!navReady || !hydrated) return
 
-    console.log('AuthRoute: isLoggedIn 变化', {
+    console.log('登录路由：登录状态变化', {
       isLoggedIn,
       prev: prevIsLoggedInRef.current,
     })
@@ -56,7 +56,7 @@ const AuthRoute = ({
 
     // 登录状态变化时进行导航
     if (prevIsLoggedInRef.current && !isLoggedIn) {
-      console.log('AuthRoute: 登出状态变化，跳转到登录页')
+      console.log('登录路由：检测到登出，跳转到登录页')
       reset('Login')
     }
     prevIsLoggedInRef.current = isLoggedIn

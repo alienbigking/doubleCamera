@@ -94,14 +94,14 @@ export const useRealtimeFilteredFrameOutputs = ({
             const snapshotCpuCopy = snapshot.makeNonTextureImage()
             if (snapshotCpuCopy == null) {
               throw new Error(
-                `Failed to create CPU copy for ${side} realtime filter preview.`,
+                `无法为${side}摄像头实时滤镜预览创建 CPU 图像副本。`,
               )
             }
 
             scheduleOnRN(updatePreviewTexture, side, snapshotCpuCopy)
           }
         } catch (error) {
-          console.error(`Realtime filter render failed on ${side}! ${error}`)
+          console.error(`${side}摄像头实时滤镜渲染失败！`, error)
         } finally {
           snapshot?.dispose()
           frame.dispose()
