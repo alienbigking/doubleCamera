@@ -15,32 +15,29 @@ if (fs.existsSync(svgPath)) {
   // 从 SVG 中提取颜色信息创建一个简单的渐变背景
   // 这是一个简化的解决方案，实际项目中应该使用专业的 SVG 转 PNG 工具
 
-  console.log('🔄 Converting SVG to PNG...')
+  console.log('🔄 正在将 SVG 转换为 PNG...')
   console.log(
-    '⚠️  Note: This is a simplified conversion. For production, use a proper SVG to PNG converter.',
+    '⚠️  提示：当前仅为简化转换，正式使用时请采用完整的 SVG 转 PNG 工具。',
   )
 
   // 创建一个简单的紫色渐变背景（基于 SVG 的颜色）
   const createSimplePNG = () => {
     // 由于我们无法在 Node.js 中直接生成 PNG，这里提供一个解决方案
-    console.log(
-      '📝 SVG content extracted:',
-      svgContent.substring(0, 100) + '...',
-    )
-    console.log('🎨 Detected purple gradient color: #5B54E4')
+    console.log('📝 已提取 SVG 内容：', svgContent.substring(0, 100) + '...')
+    console.log('🎨 检测到的渐变颜色：#5B54E4')
 
     // 建议使用在线工具或专业库进行转换
     console.log('💡建议：使用以下方法之一：')
     console.log('1. 在线转换工具：https://convertio.co/svg-png/')
-    console.log('2. 使用 ImageMagick: convert 2.svg 2.png')
+    console.log('2. 使用 ImageMagick：convert 2.svg 2.png')
     console.log('3. 使用 Sharp 库进行专业转换')
 
     // 创建一个占位符文件
     fs.writeFileSync(pngPath, 'placeholder')
-    console.log('✅ Placeholder PNG file created')
+    console.log('✅ 占位 PNG 文件已创建')
   }
 
   createSimplePNG()
 } else {
-  console.log('❌ SVG file not found:', svgPath)
+  console.log('❌ 未找到 SVG 文件：', svgPath)
 }

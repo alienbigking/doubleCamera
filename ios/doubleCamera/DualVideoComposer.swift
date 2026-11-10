@@ -1,24 +1,33 @@
+// 原生双摄视频合成器：将前后摄录像对齐、合成为单个视频并保留主摄音频。
 import AVFoundation
 import CoreImage
 import React
 import UIKit
+import os
 
 @objc(DualVideoComposer)
 final class DualVideoComposer: NSObject {
   private struct VideoGeometry {
     let naturalSize: CGSize
     let orientedSize: CGSize
-    let normalizedTransform: CGAffineTransform
     let preferredTransform: CGAffineTransform
     let orientation: CGImagePropertyOrientation
-    let isFrontCamera: Bool
   }
+
+  private static let performanceLog = OSLog(
+    subsystem: "com.skqy.doublecamera.app",
+    category: "DualVideo"
+  )
 
   @objc static func requiresMainQueueSetup() -> Bool {
     false
   }
 
-  @objc(composeDualVideo:frontVideoPath:layout:pipX:pipY:pipWidth:pipHeight:previewWidth:previewHeight:aspectRatio:primaryCamera:pipBorderVisible:resolver:rejecter:)
+  @objc(
+    composeDualVideo:frontVideoPath:layout:pipX:pipY:pipWidth:pipHeight:previewWidth:previewHeight:
+    aspectRatio:primaryCamera:pipBorderVisible:resolver:rejecter:
+  )
+  /// 接收 JS 合成请求，并在后台队列执行双摄视频合成。
   func composeDualVideo(
     rearVideoPath: String,
     frontVideoPath: String,
@@ -62,6 +71,7 @@ final class DualVideoComposer: NSObject {
     }
   }
 
+  /// 对齐前后摄轨道、渲染合成画面并保留主摄音频。
   private func compose(
     rearVideoPath: String,
     frontVideoPath: String,
@@ -72,6 +82,13 @@ final class DualVideoComposer: NSObject {
     primaryCamera: String,
     pipBorderVisible: Bool
   ) async throws -> URL {
+    let composeStartedAt = CFAbsoluteTimeGetCurrent()
+    let signpostID = OSSignpostID(log: Self.performanceLog)
+    os_signpost(.begin, log: Self.performanceLog, name: "合成", signpostID: signpostID)
+    defer {
+      os_signpost(.end, log: Self.performanceLog, name: "合成", signpostID: signpostID)
+    }
+
     let rearAsset = AVURLAsset(url: URL(fileURLWithPath: rearVideoPath))
     let frontAsset = AVURLAsset(url: URL(fileURLWithPath: frontVideoPath))
     guard
@@ -81,7 +98,7 @@ final class DualVideoComposer: NSObject {
       throw NSError(
         domain: "DualVideoComposer",
         code: -1,
-        userInfo: [NSLocalizedDescriptionKey: "Missing video tracks"]
+        userInfo: [NSLocalizedDescriptionKey: "缺少视频轨道"]
       )
     }
 
@@ -90,22 +107,28 @@ final class DualVideoComposer: NSObject {
       throw NSError(
         domain: "DualVideoComposer",
         code: -4,
-        userInfo: [NSLocalizedDescriptionKey: "Recorded videos have invalid duration"]
+        userInfo: [NSLocalizedDescriptionKey: "录像时长无效"]
       )
     }
 
     let rearGeometry = try await videoGeometry(for: rearSourceTrack, side: "rear")
     let frontGeometry = try await videoGeometry(for: frontSourceTrack, side: "front")
-    let primarySize = primaryCamera == "front" ? frontGeometry.orientedSize : rearGeometry.orientedSize
+    let primaryAsset = primaryCamera == "front" ? frontAsset : rearAsset
+    let primarySize =
+      primaryCamera == "front" ? frontGeometry.orientedSize : rearGeometry.orientedSize
     let outputSize = outputSize(for: primarySize, aspectRatio: aspectRatio)
 
     let outputURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent(
-        "dualcam-video-\(Int(Date().timeIntervalSince1970 * 1000)).mp4"
-      )
-    try? FileManager.default.removeItem(at: outputURL)
+      .appendingPathComponent("dualcam-video-\(UUID().uuidString).mp4")
+    var shouldKeepOutput = false
+    defer {
+      if !shouldKeepOutput {
+        try? FileManager.default.removeItem(at: outputURL)
+      }
+    }
 
-    try renderComposedVideo(
+    let renderStartedAt = CFAbsoluteTimeGetCurrent()
+    let frameCount = try renderComposedVideo(
       rearAsset: rearAsset,
       frontAsset: frontAsset,
       rearTrack: rearSourceTrack,
@@ -122,17 +145,35 @@ final class DualVideoComposer: NSObject {
       primaryCamera: primaryCamera,
       pipBorderVisible: pipBorderVisible
     )
-
-    let primaryAsset = primaryCamera == "front" ? frontAsset : rearAsset
+    let renderElapsed = CFAbsoluteTimeGetCurrent() - renderStartedAt
+    let renderedAsset = AVURLAsset(url: outputURL)
+    let renderedDuration = try await renderedAsset.load(.duration)
+    let audioDuration = min(duration, renderedDuration)
     try await muxPrimaryAudioIfNeeded(
       from: primaryAsset,
       videoURL: outputURL,
-      duration: duration
+      duration: audioDuration
+    )
+    shouldKeepOutput = true
+
+    let outputBytes =
+      ((try? FileManager.default.attributesOfItem(atPath: outputURL.path)[.size]) as? NSNumber)?
+      .int64Value ?? 0
+    NSLog(
+      "双摄视频性能统计：时长=%.2f秒 帧数=%ld 输出=%dx%d 渲染=%.2f秒 总耗时=%.2f秒 文件大小=%.1fMB",
+      duration.seconds,
+      frameCount,
+      Int(outputSize.width),
+      Int(outputSize.height),
+      renderElapsed,
+      CFAbsoluteTimeGetCurrent() - composeStartedAt,
+      Double(outputBytes) / 1_048_576
     )
 
     return outputURL
   }
 
+  /// 根据输入轨道和画中画参数逐帧渲染最终视频。
   private func renderComposedVideo(
     rearAsset: AVAsset,
     frontAsset: AVAsset,
@@ -149,7 +190,7 @@ final class DualVideoComposer: NSObject {
     aspectRatio: CGFloat,
     primaryCamera: String,
     pipBorderVisible: Bool
-  ) throws {
+  ) throws -> Int {
     let rearReader = try AVAssetReader(asset: rearAsset)
     let frontReader = try AVAssetReader(asset: frontAsset)
     let readerSettings: [String: Any] = [
@@ -165,7 +206,7 @@ final class DualVideoComposer: NSObject {
       throw NSError(
         domain: "DualVideoComposer",
         code: -7,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to create video readers"]
+        userInfo: [NSLocalizedDescriptionKey: "创建视频读取器失败"]
       )
     }
     rearReader.timeRange = CMTimeRange(start: .zero, duration: duration)
@@ -199,7 +240,7 @@ final class DualVideoComposer: NSObject {
       throw NSError(
         domain: "DualVideoComposer",
         code: -8,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to create video writer"]
+        userInfo: [NSLocalizedDescriptionKey: "创建视频写入器失败"]
       )
     }
     writer.add(writerInput)
@@ -209,7 +250,8 @@ final class DualVideoComposer: NSObject {
         domain: "DualVideoComposer",
         code: -9,
         userInfo: [
-          NSLocalizedDescriptionKey: "Failed to start video readers: rear=\(rearReader.error?.localizedDescription ?? "unknown"), front=\(frontReader.error?.localizedDescription ?? "unknown")"
+          NSLocalizedDescriptionKey:
+            "启动视频读取器失败：后摄=\(rearReader.error?.localizedDescription ?? "未知")，前摄=\(frontReader.error?.localizedDescription ?? "未知")"
         ]
       )
     }
@@ -217,7 +259,10 @@ final class DualVideoComposer: NSObject {
       throw NSError(
         domain: "DualVideoComposer",
         code: -10,
-        userInfo: [NSLocalizedDescriptionKey: "Failed to start video writer: \(writer.error?.localizedDescription ?? "unknown")"]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "启动视频写入器失败：\(writer.error?.localizedDescription ?? "未知")"
+        ]
       )
     }
     writer.startSession(atSourceTime: .zero)
@@ -256,24 +301,16 @@ final class DualVideoComposer: NSObject {
       ? makePipMaskImage(destination: insetDestination, outputSize: outputSize)
       : nil
 
-    NSLog(
-      """
-      DualVideoComposer render start version=track-transform-20260609-11 layout=\(layout) primary=\(primaryCamera) pipBorder=\(pipBorderVisible)
-      output=\(formatSize(outputSize)) preview=\(formatSize(previewSize)) aspectRatio=\(formatNumber(aspectRatio))
-      mainDestination=\(formatRect(mainDestination)) insetDestination=\(formatRect(insetDestination))
-      rear natural=\(formatSize(rearGeometry.naturalSize)) oriented=\(formatSize(rearGeometry.orientedSize)) preferred=\(formatTransform(rearGeometry.preferredTransform)) orientation=\(orientationText(rearGeometry.orientation))
-      front natural=\(formatSize(frontGeometry.naturalSize)) oriented=\(formatSize(frontGeometry.orientedSize)) preferred=\(formatTransform(frontGeometry.preferredTransform)) orientation=\(orientationText(frontGeometry.orientation))
-      """
-    )
-
     let mainGeometry = primaryCamera == "front" ? frontGeometry : rearGeometry
     let insetGeometry = primaryCamera == "front" ? rearGeometry : frontGeometry
-    let insetReaderOutput = primaryCamera == "front" ? rearOutput : frontOutput
     var frameCount = 0
+    var outputTimeOrigin: CMTime?
+    var openingFrameAttempts = 0
 
     while writer.status == .writing,
       rearReader.status == .reading,
-      frontReader.status == .reading {
+      frontReader.status == .reading
+    {
       guard
         let rearSample = rearOutput.copyNextSampleBuffer(),
         let frontSample = frontOutput.copyNextSampleBuffer()
@@ -281,8 +318,8 @@ final class DualVideoComposer: NSObject {
         break
       }
 
-      var mainSample = primaryCamera == "front" ? frontSample : rearSample
-      var insetSample = primaryCamera == "front" ? rearSample : frontSample
+      let mainSample = primaryCamera == "front" ? frontSample : rearSample
+      let insetSample = primaryCamera == "front" ? rearSample : frontSample
 
       guard
         let mainBuffer = CMSampleBufferGetImageBuffer(mainSample),
@@ -296,40 +333,19 @@ final class DualVideoComposer: NSObject {
         break
       }
 
-      if CMTimeGetSeconds(presentationTime) < 2.5 {
-        var currentInsetBuffer = insetBuffer
-        var skippedBlackInsetFrames = 0
-        while skippedBlackInsetFrames < 90 {
-          let insetProbeImage = normalizedTrackImage(
-            from: currentInsetBuffer,
-            geometry: insetGeometry
-          )
-          if !isMostlyBlack(insetProbeImage, context: context) {
-            break
-          }
-          guard let nextInsetSample = insetReaderOutput.copyNextSampleBuffer(),
-            let nextInsetBuffer = CMSampleBufferGetImageBuffer(nextInsetSample) else {
-            break
-          }
-          insetSample = nextInsetSample
-          currentInsetBuffer = nextInsetBuffer
-          skippedBlackInsetFrames += 1
+      if frameCount == 0, openingFrameAttempts < 15 {
+        openingFrameAttempts += 1
+        let mainIsBlack = isMostlyBlack(
+          normalizedTrackImage(from: mainBuffer, geometry: mainGeometry),
+          context: context
+        )
+        let insetIsBlack = isMostlyBlack(
+          normalizedTrackImage(from: insetBuffer, geometry: insetGeometry),
+          context: context
+        )
+        if mainIsBlack || insetIsBlack {
+          continue
         }
-
-        if skippedBlackInsetFrames > 0 {
-          NSLog(
-            "DualVideoComposer skipped black inset frames=%ld at time=%.3f",
-            skippedBlackInsetFrames,
-            CMTimeGetSeconds(presentationTime)
-          )
-        }
-      }
-
-      guard
-        let resolvedMainBuffer = CMSampleBufferGetImageBuffer(mainSample),
-        let resolvedInsetBuffer = CMSampleBufferGetImageBuffer(insetSample)
-      else {
-        break
       }
 
       while !writerInput.isReadyForMoreMediaData {
@@ -340,7 +356,7 @@ final class DualVideoComposer: NSObject {
         throw NSError(
           domain: "DualVideoComposer",
           code: -11,
-          userInfo: [NSLocalizedDescriptionKey: "Video writer pixel buffer pool is unavailable"]
+          userInfo: [NSLocalizedDescriptionKey: "视频写入器像素缓冲池不可用"]
         )
       }
 
@@ -354,66 +370,48 @@ final class DualVideoComposer: NSObject {
         throw NSError(
           domain: "DualVideoComposer",
           code: -12,
-          userInfo: [NSLocalizedDescriptionKey: "Failed to create output pixel buffer"]
+          userInfo: [NSLocalizedDescriptionKey: "创建输出像素缓冲区失败"]
         )
       }
 
       autoreleasepool {
         let background = CIImage(color: .black).cropped(to: outputRect)
         let mainImage = renderImage(
-          from: resolvedMainBuffer,
+          from: mainBuffer,
           geometry: mainGeometry,
           destination: mainDestination,
           outputSize: outputSize
         )
         let rawInsetImage = renderImage(
-          from: resolvedInsetBuffer,
+          from: insetBuffer,
           geometry: insetGeometry,
           destination: insetDestination,
           outputSize: outputSize
         )
-        let insetImage = clipPipImage(rawInsetImage, maskImage: pipMaskImage, outputSize: outputSize)
-        if frameCount == 0 {
-          let mainRawImage = CIImage(cvPixelBuffer: resolvedMainBuffer)
-          let insetRawImage = CIImage(cvPixelBuffer: resolvedInsetBuffer)
-          let mainNormalizedImage = normalizedTrackImage(from: resolvedMainBuffer, geometry: mainGeometry)
-          let insetNormalizedImage = normalizedTrackImage(from: resolvedInsetBuffer, geometry: insetGeometry)
-          let composedImage = composeLayers(
-            mainImage: mainImage,
-            insetImage: insetImage,
-            background: background,
-            pipBorderImage: pipBorderImage
-          )
-          writeDebugImage(mainImage, name: "main-rendered", context: context, colorSpace: colorSpace)
-          writeDebugImage(insetImage, name: "inset-rendered", context: context, colorSpace: colorSpace)
-          writeDebugImage(composedImage, name: "composed", context: context, colorSpace: colorSpace)
-          NSLog(
-            """
-            DualVideoComposer first frame
-            main rawExtent=\(formatRect(mainRawImage.extent)) normalizedExtent=\(formatRect(mainNormalizedImage.extent)) renderedExtent=\(formatRect(mainImage.extent)) destination=\(formatRect(mainDestination))
-            inset rawExtent=\(formatRect(insetRawImage.extent)) normalizedExtent=\(formatRect(insetNormalizedImage.extent)) renderedExtent=\(formatRect(insetImage.extent)) destination=\(formatRect(insetDestination))
-            main avg raw=\(averageColorText(mainRawImage, context: context)) normalized=\(averageColorText(mainNormalizedImage, context: context)) rendered=\(averageColorText(mainImage, context: context))
-            inset avg raw=\(averageColorText(insetRawImage, context: context)) normalized=\(averageColorText(insetNormalizedImage, context: context)) rendered=\(averageColorText(insetImage, context: context))
-            composed avg=\(averageColorText(composedImage, context: context))
-            """
-          )
-          context.render(composedImage, to: outputBuffer, bounds: outputRect, colorSpace: colorSpace)
-        } else {
-          let composedImage = composeLayers(
-            mainImage: mainImage,
-            insetImage: insetImage,
-            background: background,
-            pipBorderImage: pipBorderImage
-          )
-          context.render(composedImage, to: outputBuffer, bounds: outputRect, colorSpace: colorSpace)
-        }
+        let insetImage = clipPipImage(
+          rawInsetImage, maskImage: pipMaskImage, outputSize: outputSize)
+        let composedImage = composeLayers(
+          mainImage: mainImage,
+          insetImage: insetImage,
+          background: background,
+          pipBorderImage: pipBorderImage
+        )
+        context.render(composedImage, to: outputBuffer, bounds: outputRect, colorSpace: colorSpace)
       }
 
-      if !adaptor.append(outputBuffer, withPresentationTime: presentationTime) {
+      let outputTime =
+        outputTimeOrigin.map {
+          CMTimeSubtract(presentationTime, $0)
+        } ?? presentationTime
+      outputTimeOrigin = outputTimeOrigin ?? presentationTime
+      if !adaptor.append(outputBuffer, withPresentationTime: outputTime) {
         throw NSError(
           domain: "DualVideoComposer",
           code: -13,
-          userInfo: [NSLocalizedDescriptionKey: "Failed to append video frame: \(writer.error?.localizedDescription ?? "unknown")"]
+          userInfo: [
+            NSLocalizedDescriptionKey:
+              "追加视频帧失败：\(writer.error?.localizedDescription ?? "未知")"
+          ]
         )
       }
       frameCount += 1
@@ -425,13 +423,14 @@ final class DualVideoComposer: NSObject {
         domain: "DualVideoComposer",
         code: -14,
         userInfo: [
-          NSLocalizedDescriptionKey: "Video reader failed: rear=\(rearReader.error?.localizedDescription ?? "unknown"), front=\(frontReader.error?.localizedDescription ?? "unknown")"
+          NSLocalizedDescriptionKey:
+            "视频读取失败：后摄=\(rearReader.error?.localizedDescription ?? "未知")，前摄=\(frontReader.error?.localizedDescription ?? "未知")"
         ]
       )
     }
 
     try finishWriting(writer)
-    NSLog("DualVideoComposer render completed frames=\(frameCount) output=\(outputURL.path)")
+    return frameCount
   }
 
   private func finishWriting(_ writer: AVAssetWriter) throws {
@@ -445,11 +444,15 @@ final class DualVideoComposer: NSObject {
       throw NSError(
         domain: "DualVideoComposer",
         code: -15,
-        userInfo: [NSLocalizedDescriptionKey: "Video writer failed: \(writer.error?.localizedDescription ?? "unknown")"]
+        userInfo: [
+          NSLocalizedDescriptionKey:
+            "视频写入失败：\(writer.error?.localizedDescription ?? "未知")"
+        ]
       )
     }
   }
 
+  /// 将主摄音轨复用到合成视频，限制音频长度与最终画面一致。
   private func muxPrimaryAudioIfNeeded(
     from asset: AVAsset,
     videoURL: URL,
@@ -460,7 +463,8 @@ final class DualVideoComposer: NSObject {
     }
 
     let renderedAsset = AVURLAsset(url: videoURL)
-    guard let renderedVideoTrack = try await renderedAsset.loadTracks(withMediaType: .video).first else {
+    guard let renderedVideoTrack = try await renderedAsset.loadTracks(withMediaType: .video).first
+    else {
       return
     }
 
@@ -483,20 +487,24 @@ final class DualVideoComposer: NSObject {
     compositionVideoTrack.preferredTransform = .identity
     try compositionAudioTrack.insertTimeRange(timeRange, of: audioTrack, at: .zero)
 
-    guard let exportSession = AVAssetExportSession(
-      asset: composition,
-      presetName: AVAssetExportPresetPassthrough
-    ) else {
+    guard
+      let exportSession = AVAssetExportSession(
+        asset: composition,
+        presetName: AVAssetExportPresetPassthrough
+      )
+    else {
       return
     }
 
     let audioOutputURL = FileManager.default.temporaryDirectory
-      .appendingPathComponent("dualcam-video-audio-\(Int(Date().timeIntervalSince1970 * 1000)).mp4")
-    try? FileManager.default.removeItem(at: audioOutputURL)
+      .appendingPathComponent("dualcam-video-audio-\(UUID().uuidString).mp4")
+    defer {
+      try? FileManager.default.removeItem(at: audioOutputURL)
+    }
 
     exportSession.outputURL = audioOutputURL
     exportSession.outputFileType = .mp4
-    exportSession.shouldOptimizeForNetworkUse = true
+    exportSession.shouldOptimizeForNetworkUse = false
 
     try await withCheckedThrowingContinuation { continuation in
       exportSession.exportAsynchronously {
@@ -505,25 +513,28 @@ final class DualVideoComposer: NSObject {
           continuation.resume()
         case .failed, .cancelled:
           continuation.resume(
-            throwing: exportSession.error ?? NSError(
-              domain: "DualVideoComposer",
-              code: -16,
-              userInfo: [NSLocalizedDescriptionKey: "Failed to export composed video with audio."]
-            )
+            throwing: exportSession.error
+              ?? NSError(
+                domain: "DualVideoComposer",
+                code: -16,
+                userInfo: [NSLocalizedDescriptionKey: "导出带音频的合成视频失败。"]
+              )
           )
         default:
           continuation.resume(
             throwing: NSError(
               domain: "DualVideoComposer",
               code: -17,
-              userInfo: [NSLocalizedDescriptionKey: "Composed video export finished in an unexpected state."]
+              userInfo: [
+                NSLocalizedDescriptionKey: "合成视频导出结束时状态异常。"
+              ]
             )
           )
         }
       }
     }
 
-    try? FileManager.default.removeItem(at: videoURL)
+    try FileManager.default.removeItem(at: videoURL)
     try FileManager.default.moveItem(at: audioOutputURL, to: videoURL)
   }
 
@@ -611,7 +622,8 @@ final class DualVideoComposer: NSObject {
       kCIInputBackgroundImageKey: maskImage,
     ]
     guard let filter = CIFilter(name: "CISourceInCompositing", parameters: parameters),
-      let outputImage = filter.outputImage else {
+      let outputImage = filter.outputImage
+    else {
       return image
     }
 
@@ -625,7 +637,8 @@ final class DualVideoComposer: NSObject {
     outputSize: CGSize
   ) -> CIImage {
     let orientedImage = normalizedTrackImage(from: pixelBuffer, geometry: geometry)
-    let sourceRect = coverSourceRect(sourceSize: orientedImage.extent.size, destination: destination)
+    let sourceRect = coverSourceRect(
+      sourceSize: orientedImage.extent.size, destination: destination)
     let scaleX = destination.width / sourceRect.width
     let scaleY = destination.height / sourceRect.height
     let croppedImage = orientedImage.cropped(to: sourceRect)
@@ -633,12 +646,15 @@ final class DualVideoComposer: NSObject {
       .concatenating(CGAffineTransform(scaleX: scaleX, y: scaleY))
       .concatenating(CGAffineTransform(translationX: destination.minX, y: destination.minY))
 
-    return croppedImage
+    return
+      croppedImage
       .transformed(by: transform)
       .cropped(to: CGRect(origin: .zero, size: outputSize))
   }
 
-  private func normalizedTrackImage(from pixelBuffer: CVPixelBuffer, geometry: VideoGeometry) -> CIImage {
+  private func normalizedTrackImage(from pixelBuffer: CVPixelBuffer, geometry: VideoGeometry)
+    -> CIImage
+  {
     let image = CIImage(cvPixelBuffer: pixelBuffer)
     let transformedImage = image.transformed(by: geometry.preferredTransform)
     let transformedExtent = transformedImage.extent
@@ -648,7 +664,8 @@ final class DualVideoComposer: NSObject {
     let orientedImage: CIImage
 
     if trackOrientedImage.extent.width > trackOrientedImage.extent.height,
-      geometry.orientedSize.height > geometry.orientedSize.width {
+      geometry.orientedSize.height > geometry.orientedSize.width
+    {
       orientedImage = image.oriented(geometry.orientation)
     } else {
       orientedImage = trackOrientedImage
@@ -658,36 +675,8 @@ final class DualVideoComposer: NSObject {
     let normalizedImage = orientedImage.transformed(
       by: CGAffineTransform(translationX: -orientedExtent.minX, y: -orientedExtent.minY)
     )
-    return normalizedImage.settingAlphaOne(in: CGRect(origin: .zero, size: normalizedImage.extent.size))
-  }
-
-  private func averageColorText(_ image: CIImage, context: CIContext) -> String {
-    let extent = image.extent
-    guard extent.width > 0, extent.height > 0 else {
-      return "empty"
-    }
-
-    let filter = CIFilter(
-      name: "CIAreaAverage",
-      parameters: [
-        kCIInputImageKey: image,
-        kCIInputExtentKey: CIVector(cgRect: extent),
-      ]
-    )
-    guard let output = filter?.outputImage else {
-      return "unavailable"
-    }
-
-    var bitmap = [UInt8](repeating: 0, count: 4)
-    context.render(
-      output,
-      toBitmap: &bitmap,
-      rowBytes: 4,
-      bounds: CGRect(x: 0, y: 0, width: 1, height: 1),
-      format: .RGBA8,
-      colorSpace: CGColorSpaceCreateDeviceRGB()
-    )
-    return "r:\(bitmap[0]) g:\(bitmap[1]) b:\(bitmap[2]) a:\(bitmap[3])"
+    return normalizedImage.settingAlphaOne(
+      in: CGRect(origin: .zero, size: normalizedImage.extent.size))
   }
 
   private func isMostlyBlack(_ image: CIImage, context: CIContext) -> Bool {
@@ -721,32 +710,6 @@ final class DualVideoComposer: NSObject {
     return brightness < 18
   }
 
-  private func writeDebugImage(
-    _ image: CIImage,
-    name: String,
-    context: CIContext,
-    colorSpace: CGColorSpace
-  ) {
-    let extent = image.extent
-    guard extent.width > 0, extent.height > 0 else { return }
-
-    let url = FileManager.default.temporaryDirectory
-      .appendingPathComponent(
-        "dualcam-debug-\(name)-\(Int(Date().timeIntervalSince1970 * 1000)).jpg"
-      )
-    do {
-      try context.writeJPEGRepresentation(
-        of: image.cropped(to: extent),
-        to: url,
-        colorSpace: colorSpace,
-        options: [:]
-      )
-      NSLog("DualVideoComposer debug image \(name)=\(url.path)")
-    } catch {
-      NSLog("DualVideoComposer debug image failed \(name): \(error.localizedDescription)")
-    }
-  }
-
   private func videoGeometry(for track: AVAssetTrack, side: String) async throws -> VideoGeometry {
     let naturalSize = try await track.load(.naturalSize)
     let transform = try await track.load(.preferredTransform)
@@ -760,20 +723,11 @@ final class DualVideoComposer: NSObject {
     } else {
       orientedSize = naturalSize
     }
-    let normalizedTransform = transform.concatenating(
-      CGAffineTransform(
-        translationX: -transformedRect.minX,
-        y: -transformedRect.minY
-      )
-    )
-
     return VideoGeometry(
       naturalSize: naturalSize,
       orientedSize: orientedSize,
-      normalizedTransform: normalizedTransform,
       preferredTransform: transform,
-      orientation: imageOrientation(for: transform, naturalSize: naturalSize, side: side),
-      isFrontCamera: side == "front"
+      orientation: imageOrientation(for: transform, naturalSize: naturalSize, side: side)
     )
   }
 
@@ -845,7 +799,8 @@ final class DualVideoComposer: NSObject {
     )
   }
 
-  private func mapPipRect(_ rect: CGRect, from previewSize: CGSize, to outputSize: CGSize) -> CGRect {
+  private func mapPipRect(_ rect: CGRect, from previewSize: CGSize, to outputSize: CGSize) -> CGRect
+  {
     guard previewSize.width > 0, previewSize.height > 0 else {
       return CGRect(
         x: outputSize.width * 0.58,
@@ -877,49 +832,13 @@ final class DualVideoComposer: NSObject {
 
     if sourceRatio > destinationRatio {
       let width = sourceSize.height * destinationRatio
-      return CGRect(x: (sourceSize.width - width) / 2, y: 0, width: width, height: sourceSize.height)
+      return CGRect(
+        x: (sourceSize.width - width) / 2, y: 0, width: width, height: sourceSize.height)
     }
 
     let height = sourceSize.width / destinationRatio
-    return CGRect(x: 0, y: (sourceSize.height - height) / 2, width: sourceSize.width, height: height)
+    return CGRect(
+      x: 0, y: (sourceSize.height - height) / 2, width: sourceSize.width, height: height)
   }
 
-  private func formatSize(_ size: CGSize) -> String {
-    "\(formatNumber(size.width))x\(formatNumber(size.height))"
-  }
-
-  private func formatRect(_ rect: CGRect) -> String {
-    "x:\(formatNumber(rect.minX)) y:\(formatNumber(rect.minY)) w:\(formatNumber(rect.width)) h:\(formatNumber(rect.height))"
-  }
-
-  private func formatTransform(_ transform: CGAffineTransform) -> String {
-    "[a:\(formatNumber(transform.a)) b:\(formatNumber(transform.b)) c:\(formatNumber(transform.c)) d:\(formatNumber(transform.d)) tx:\(formatNumber(transform.tx)) ty:\(formatNumber(transform.ty))]"
-  }
-
-  private func orientationText(_ orientation: CGImagePropertyOrientation) -> String {
-    switch orientation {
-    case .up:
-      return "up"
-    case .upMirrored:
-      return "upMirrored"
-    case .down:
-      return "down"
-    case .downMirrored:
-      return "downMirrored"
-    case .left:
-      return "left"
-    case .leftMirrored:
-      return "leftMirrored"
-    case .right:
-      return "right"
-    case .rightMirrored:
-      return "rightMirrored"
-    @unknown default:
-      return "unknown"
-    }
-  }
-
-  private func formatNumber(_ value: CGFloat) -> String {
-    String(format: "%.3f", Double(value))
-  }
 }

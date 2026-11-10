@@ -113,6 +113,7 @@ import { resolveSceneHint, type SceneHint } from './sceneHints'
 import {
   getGalleryAssetIndex,
   markGalleryAssets,
+  removeGalleryAssets,
   type GalleryAssetKind,
 } from './galleryAssetIndex'
 import { useVolumeButtonShutter } from './useVolumeButtonShutter'
@@ -152,7 +153,10 @@ type Recorders = Partial<Record<CameraSide, Recorder>>
 type CameraPair = Record<CameraSide, CameraDevice>
 type Point = { x: number; y: number }
 type CapturedPhotoFiles = Record<CameraSide, string> & { capturedAt: string }
-type RecordedVideo = { side: CameraSide; filePath: string }
+type RecordedVideo = {
+  side: CameraSide | 'combined'
+  filePath: string
+}
 type RecordedVideoFile = RecordedVideo & { uri: string; size: number }
 type SavedCameraRollAsset = Awaited<ReturnType<typeof CameraRoll.saveAsset>>
 type SceneSignals = Record<
@@ -184,7 +188,6 @@ const videoFrameRateOptionsByResolution: Record<
 > = {
   '720p': [24, 30, 60],
   '1080p': [24, 30, 60],
-  '4k': [24, 30],
 }
 const audioSampleRateByQuality: Record<AudioQualityMode, number> = {
   standard: 22_050,
@@ -202,10 +205,6 @@ const videoResolutionConfig: Record<
   '1080p': {
     label: '1080p',
     resolution: CommonResolutions.FHD_16_9,
-  },
-  '4k': {
-    label: '4K',
-    resolution: CommonResolutions.UHD_16_9,
   },
 }
 const defaultProfessionalISO = 120
@@ -268,12 +267,7 @@ const getVideoTargetBitRate = (
   frameRate: VideoFrameRateMode,
   quality: AudioQualityMode,
 ) => {
-  const baseBitRate =
-    resolution === '4k'
-      ? 28_000_000
-      : resolution === '1080p'
-      ? 12_000_000
-      : 7_000_000
+  const baseBitRate = resolution === '1080p' ? 12_000_000 : 7_000_000
   const frameMultiplier = frameRate >= 60 ? 1.45 : frameRate === 24 ? 0.9 : 1
   const qualityMultiplier =
     quality === 'max' ? 1.22 : quality === 'high' ? 1.08 : 1
@@ -292,7 +286,7 @@ const buildVideoOutputConfig = ({
   audioChannelMode: AudioChannelMode
   audioQualityMode: AudioQualityMode
 }) => {
-  const enableHigherResolutionCodecs = resolution === '4k' || frameRate >= 60
+  const enableHigherResolutionCodecs = frameRate >= 60
   const enableVideoAudio = audioChannelMode !== 'off'
   const targetBitRate = getVideoTargetBitRate(
     resolution,
@@ -335,7 +329,6 @@ const createEmptyCaptureAnalyticsStats = (): CaptureAnalyticsStats => {
     videoResolutionUsage: {
       '720p': 0,
       '1080p': 0,
-      '4k': 0,
     },
     videoSaveModeUsage: {
       combined: 0,
@@ -469,7 +462,7 @@ const safeUnlinkFile = async (uri?: string) => {
       await RNFS.unlink(path)
     }
   } catch (error) {
-    console.warn('Clean temporary capture file failed', error)
+    console.warn('清理临时拍摄文件失败', error)
   }
 }
 
@@ -612,6 +605,11 @@ const DualCamera = () => {
   const [frontWhiteBalancePreset, setFrontWhiteBalancePreset] =
     useState<WhiteBalancePreset>('auto')
   const [galleryAssets, setGalleryAssets] = useState<GalleryAsset[]>([])
+  const [galleryPreview, setGalleryPreview] = useState<{
+    uri: string
+    type: 'photo' | 'video'
+    processing?: boolean
+  }>()
   const [galleryLoading, setGalleryLoading] = useState(false)
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>('loading')
   const [previewError, setPreviewError] = useState<string>()
@@ -655,6 +653,7 @@ const DualCamera = () => {
   const saveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   )
+  const galleryPreviewTaskRef = useRef(0)
   const controlStatusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   )
@@ -715,8 +714,7 @@ const DualCamera = () => {
   const isPip = layout === 'pip'
   const toneAdjustmentsEnabled = hasProfessionalToneAdjustments(toneAdjustments)
   const realtimeFilterEnabled =
-    mode === 'photo' &&
-    (selectedFilterId !== 'none' || toneAdjustmentsEnabled)
+    mode === 'photo' && (selectedFilterId !== 'none' || toneAdjustmentsEnabled)
   const {
     frameOutputs: realtimeFilterFrameOutputs,
     textures: realtimeTextures,
@@ -730,7 +728,7 @@ const DualCamera = () => {
     try {
       setCaptureAnalyticsStats(await getCaptureAnalyticsStats())
     } catch (error) {
-      console.warn('Load capture analytics failed', error)
+      console.warn('加载拍摄统计失败', error)
     }
   }, [])
 
@@ -744,7 +742,7 @@ const DualCamera = () => {
       try {
         setCaptureAnalyticsStats(await tracker())
       } catch (error) {
-        console.warn('Track capture analytics failed', error)
+        console.warn('记录拍摄统计失败', error)
       }
     },
     [captureAnalyticsEnabled],
@@ -764,7 +762,7 @@ const DualCamera = () => {
       setCaptureAnalyticsStats(await resetCaptureAnalyticsStats())
       showControlStatusMessage('拍摄统计已清空')
     } catch (error) {
-      console.warn('Reset capture analytics failed', error)
+      console.warn('重置拍摄统计失败', error)
       showControlStatusMessage('清空统计失败')
     }
   }, [])
@@ -1066,26 +1064,11 @@ const DualCamera = () => {
   ).current
 
   useEffect(() => {
+    if (nativeDualCameraEnabled) return
+
     let cancelled = false
 
     const startMultiCamPreview = async () => {
-      if (nativeDualCameraEnabled) {
-        setPreviewOutputs({})
-        setPreviewStatus('loading')
-        setPreviewError(undefined)
-        setVideoCaptureReady(false)
-        previewOutputsRef.current = {}
-        frameOutputsRef.current = {}
-        photoOutputsRef.current = {}
-        videoOutputsRef.current = {}
-        sceneObjectOutputsRef.current = {}
-        rearCameraControllerRef.current = null
-        frontCameraControllerRef.current = null
-        primaryPreviewRef.current = null
-        cameraPairRef.current = null
-        return
-      }
-
       try {
         setPreviewStatus('loading')
         setPreviewError(undefined)
@@ -1290,7 +1273,7 @@ const DualCamera = () => {
           setPreviewStatus('ready')
         }
       } catch (error) {
-        console.warn('Start multi-cam preview failed', error)
+        console.warn('启动双摄预览失败', error)
         if (!cancelled) {
           setPreviewStatus('error')
           setPreviewError(
@@ -1359,10 +1342,7 @@ const DualCamera = () => {
       : {}
 
     configurePhotoSession().catch(error => {
-      console.warn(
-        'Reconfigure photo session for realtime filter failed',
-        error,
-      )
+      console.warn('为实时滤镜重新配置拍照会话失败', error)
       showControlStatusMessage('实时滤镜切换失败')
     })
   }, [
@@ -1385,6 +1365,8 @@ const DualCamera = () => {
   const effectiveDualVideoComposeMode: DualVideoComposeMode =
     layout === 'split' ? 'split' : 'pip'
   const availableVideoFrameRates = (() => {
+    if (nativeDualCameraEnabled) return [30] as VideoFrameRateMode[]
+
     const preferredOptions = videoFrameRateOptionsByResolution[videoResolution]
     const pair = cameraPairRef.current
 
@@ -1404,13 +1386,6 @@ const DualCamera = () => {
   }, [filterRenderQuality])
 
   useEffect(() => {
-    if (videoResolution !== '4k') return
-
-    setVideoResolution('1080p')
-    setVideoCaptureReady(false)
-  }, [videoResolution])
-
-  useEffect(() => {
     if (availableVideoFrameRates.includes(videoFrameRate)) return
 
     const fallbackFrameRate = getPreferredVideoFrameRate(
@@ -1428,10 +1403,11 @@ const DualCamera = () => {
       ? t('common.rearPreview')
       : t('common.frontPreview')
   const previewStatusText = getCameraStatusText(previewStatus, previewError)
+  const localizedLensOptions = lensOptions.map(localizeLensOption)
   const selectedLens =
-    lensOptions.find(option => option.id === selectedLensId) ||
-    lensOptions[0] ||
-    defaultLensOptions[0]
+    localizedLensOptions.find(option => option.id === selectedLensId) ||
+    localizedLensOptions[0] ||
+    localizeLensOption(defaultLensOptions[0])
   const rearController = rearCameraControllerRef.current
   const supportsProfessionalExposure =
     Platform.OS === 'ios' && !!rearController?.device.supportsExposureLocking
@@ -1481,10 +1457,15 @@ const DualCamera = () => {
           type: edge.node.type,
           filename: edge.node.image.filename || undefined,
           kind: galleryAssetIndex[edge.node.id],
+          width: edge.node.image.width,
+          height: edge.node.image.height,
+          fileSize: edge.node.image.fileSize,
+          playableDuration: edge.node.image.playableDuration,
+          timestamp: edge.node.timestamp,
         })),
       )
     } catch (error) {
-      console.warn('Load camera roll failed', error)
+      console.warn('加载系统相册失败', error)
       setGalleryAssets([])
     } finally {
       setGalleryLoading(false)
@@ -1492,8 +1473,19 @@ const DualCamera = () => {
   }
 
   const openGallery = () => {
+    setGalleryLoading(true)
     setGalleryOpen(true)
     loadGalleryAssets()
+  }
+
+  const deleteGalleryAssets = async (assets: GalleryAsset[]) => {
+    const ids = assets.map(asset => asset.id)
+    await CameraRoll.deletePhotos(ids)
+    await removeGalleryAssets(ids)
+    const deletedIds = new Set(ids)
+    setGalleryAssets(previous =>
+      previous.filter(asset => !deletedIds.has(asset.id)),
+    )
   }
 
   const selectLens = (option: LensOption) => {
@@ -1503,7 +1495,7 @@ const DualCamera = () => {
       showControlStatusMessage(`焦段：${option.label}`)
     }
     rearCameraControllerRef.current?.setZoom(option.zoomValue).catch(error => {
-      console.warn('Set rear camera zoom failed', error)
+      console.warn('设置后摄变焦失败', error)
     })
   }
 
@@ -1514,7 +1506,7 @@ const DualCamera = () => {
     if (!rearHasTorch || !controller) return
 
     controller.setTorchMode(mode === 'on' ? 'on' : 'off').catch(error => {
-      console.warn('Set rear camera torch failed', error)
+      console.warn('设置后摄闪光灯失败', error)
     })
   }
 
@@ -1631,7 +1623,7 @@ const DualCamera = () => {
           : undefined,
       })
     } catch (error) {
-      console.warn('Apply AI enhancement settings failed', error)
+      console.warn('应用 AI 画质增强设置失败', error)
       showControlStatusMessage('AI增强设置失败')
     }
   }
@@ -1757,7 +1749,7 @@ const DualCamera = () => {
           proShutterDuration,
         )
           .catch(error => {
-            console.warn('Preview professional ISO failed', error)
+            console.warn('预览专业模式 ISO 设置失败', error)
           })
           .finally(() => {
             professionalIsoApplyingRef.current = false
@@ -1790,7 +1782,7 @@ const DualCamera = () => {
         professionalFocusApplyingRef.current = true
         applyProfessionalFocusSettings(pendingValue)
           .catch(error => {
-            console.warn('Preview professional focus failed', error)
+            console.warn('预览专业模式对焦设置失败', error)
           })
           .finally(() => {
             professionalFocusApplyingRef.current = false
@@ -1825,7 +1817,7 @@ const DualCamera = () => {
         professionalShutterApplyingRef.current = true
         applyProfessionalExposureSettings(proISO, pendingValue)
           .catch(error => {
-            console.warn('Preview professional shutter failed', error)
+            console.warn('预览专业模式快门设置失败', error)
           })
           .finally(() => {
             professionalShutterApplyingRef.current = false
@@ -1883,7 +1875,7 @@ const DualCamera = () => {
         showControlStatusMessage('专业模式已关闭')
       }
     } catch (error) {
-      console.warn('Toggle professional mode failed', error)
+      console.warn('切换专业模式失败', error)
       showControlStatusMessage('专业模式切换失败')
     }
   }
@@ -1918,7 +1910,7 @@ const DualCamera = () => {
         proShutterDuration,
       )
     } catch (error) {
-      console.warn('Set professional ISO failed', error)
+      console.warn('设置专业模式 ISO 失败', error)
       showControlStatusMessage('ISO 设置失败')
     }
   }
@@ -1930,7 +1922,7 @@ const DualCamera = () => {
     try {
       await applyProfessionalExposureSettings(proISO, value)
     } catch (error) {
-      console.warn('Set professional shutter failed', error)
+      console.warn('设置专业模式快门失败', error)
       showControlStatusMessage('快门设置失败')
     }
   }
@@ -1954,7 +1946,7 @@ const DualCamera = () => {
     try {
       await applyProfessionalExposureSettings(proISO, value)
     } catch (error) {
-      console.warn('Commit professional shutter failed', error)
+      console.warn('应用专业模式快门失败', error)
       showControlStatusMessage('快门设置失败')
     }
   }
@@ -1979,7 +1971,7 @@ const DualCamera = () => {
     try {
       await applyProfessionalFocusSettings(value)
     } catch (error) {
-      console.warn('Set professional focus failed', error)
+      console.warn('设置专业模式手动对焦失败', error)
       showControlStatusMessage('手动对焦失败')
     }
   }
@@ -2053,7 +2045,7 @@ const DualCamera = () => {
       trackCaptureAction('aiEnhancement', `lowLight:${enabled ? 'on' : 'off'}`)
       showControlStatusMessage(enabled ? '低光增强已开启' : '低光增强已关闭')
     } catch (error) {
-      console.warn('Toggle low light boost failed', error)
+      console.warn('切换低光增强失败', error)
       showControlStatusMessage('低光增强设置失败')
     }
   }
@@ -2074,7 +2066,7 @@ const DualCamera = () => {
       )
       showControlStatusMessage(enabled ? '平滑对焦已开启' : '平滑对焦已关闭')
     } catch (error) {
-      console.warn('Toggle smooth focus failed', error)
+      console.warn('切换平滑对焦失败', error)
       showControlStatusMessage('平滑对焦设置失败')
     }
   }
@@ -2095,13 +2087,20 @@ const DualCamera = () => {
       )
       showControlStatusMessage(enabled ? '畸变矫正已开启' : '畸变矫正已关闭')
     } catch (error) {
-      console.warn('Toggle distortion correction failed', error)
+      console.warn('切换畸变矫正失败', error)
       showControlStatusMessage('畸变矫正设置失败')
     }
   }
 
   const selectVideoResolution = (value: VideoResolutionMode) => {
-    const resolvedResolution = value === '4k' ? '1080p' : value
+    const resolvedResolution = value
+    if (nativeDualCameraEnabled) {
+      setVideoResolution(resolvedResolution)
+      setVideoFrameRate(30)
+      setVideoCaptureReady(false)
+      showControlStatusMessage(`${resolvedResolution} 30fps 下次录像生效`)
+      return
+    }
     const nextFrameRates = videoFrameRateOptionsByResolution[
       resolvedResolution
     ].filter(fps => {
@@ -2166,6 +2165,14 @@ const DualCamera = () => {
     setFilterRenderQuality(quality)
     showControlStatusMessage(`照片质量：${getPhotoRenderQualityLabel(quality)}`)
 
+    // iOS uses the native dual-camera pipeline. Changing export quality does
+    // not require rebuilding the preview session or showing an init state.
+    if (nativeDualCameraEnabled) {
+      setPreviewStatus('ready')
+      setPreviewError(undefined)
+      return
+    }
+
     if (mode !== 'photo' || previewStatus !== 'ready') return
 
     setVideoCaptureReady(false)
@@ -2197,7 +2204,7 @@ const DualCamera = () => {
     try {
       await Linking.openURL(storeUrl)
     } catch (error) {
-      console.warn('Open rate app link failed', error)
+      console.warn('打开应用商店评价页面失败', error)
       showControlStatusMessage(t('status.rateUnavailable'))
     }
   }
@@ -2210,7 +2217,7 @@ const DualCamera = () => {
         url: storeUrl,
       })
     } catch (error) {
-      console.warn('Share app failed', error)
+      console.warn('分享应用失败', error)
       showControlStatusMessage(t('status.shareFailed'))
     }
   }
@@ -2219,7 +2226,7 @@ const DualCamera = () => {
     try {
       await Linking.openURL(getFeedbackMailtoUrl())
     } catch (error) {
-      console.warn('Open feedback mail failed', error)
+      console.warn('打开反馈邮件失败', error)
       showControlStatusMessage(t('status.feedbackUnavailable'))
     }
   }
@@ -2241,7 +2248,7 @@ const DualCamera = () => {
         }),
       )
     } catch (error) {
-      console.warn('Change app language failed', error)
+      console.warn('切换应用语言失败', error)
       showControlStatusMessage(t('status.languageChangeFailed'))
     }
   }
@@ -2322,7 +2329,7 @@ const DualCamera = () => {
         setFocusLocked(true)
       }
     } catch (error) {
-      console.warn('Toggle focus lock failed', error)
+      console.warn('切换对焦锁定失败', error)
       showControlStatusMessage('对焦锁定失败')
     }
   }
@@ -2360,7 +2367,7 @@ const DualCamera = () => {
             setFocusLocked(false)
           }
         } catch (error) {
-          console.warn('Native tap to focus failed', error)
+          console.warn('原生点按对焦失败', error)
         }
         return
       }
@@ -2406,13 +2413,13 @@ const DualCamera = () => {
             autoResetAfter: 5,
           })
           .catch(error => {
-            console.info('Tap focus did not settle cleanly', error)
+            console.info('点按对焦未能稳定完成', error)
           })
         if (primaryCamera === 'rear') {
           setFocusLocked(false)
         }
       } catch (error) {
-        console.warn('Tap to focus failed', error)
+        console.warn('点按对焦失败', error)
         showControlStatusMessage('点按对焦失败')
       }
     },
@@ -2473,7 +2480,7 @@ const DualCamera = () => {
     try {
       await controller.setExposureBias(nextBias)
     } catch (error) {
-      console.warn('Set exposure bias failed', error)
+      console.warn('设置曝光补偿失败', error)
       showControlStatusMessage('曝光设置失败')
     }
   }
@@ -2520,7 +2527,7 @@ const DualCamera = () => {
         setFrontWhiteBalancePreset(preset)
       }
     } catch (error) {
-      console.warn('Set white balance failed', error)
+      console.warn('设置白平衡失败', error)
       showControlStatusMessage('白平衡设置失败')
     }
   }
@@ -2600,7 +2607,7 @@ const DualCamera = () => {
       const location = await requestCurrentCaptureLocation()
       return location || undefined
     } catch (error) {
-      console.warn('Request capture location failed', error)
+      console.warn('获取拍摄位置失败', error)
       showControlStatusMessage('定位获取失败，本次不写入位置')
       return undefined
     }
@@ -2619,6 +2626,29 @@ const DualCamera = () => {
       })),
       ...previous,
     ])
+  }
+
+  const showLocalGalleryPreview = (uri: string, type: 'photo' | 'video') => {
+    const taskId = galleryPreviewTaskRef.current + 1
+    galleryPreviewTaskRef.current = taskId
+    setGalleryPreview({ uri, type, processing: true })
+    return taskId
+  }
+
+  const replaceGalleryPreviewWithAsset = (
+    asset: SavedCameraRollAsset,
+    taskId = galleryPreviewTaskRef.current,
+  ) => {
+    if (taskId !== galleryPreviewTaskRef.current) return
+    setGalleryPreview({
+      uri: asset.node.image.uri,
+      type: asset.node.type.toLowerCase().includes('video') ? 'video' : 'photo',
+    })
+  }
+
+  const clearGalleryPreview = (taskId = galleryPreviewTaskRef.current) => {
+    if (taskId !== galleryPreviewTaskRef.current) return
+    setGalleryPreview(undefined)
   }
 
   const markSavedGalleryAssets = async (
@@ -2707,18 +2737,18 @@ const DualCamera = () => {
         throw error
       }
 
-      console.warn(
-        'Combined photo save failed at selected quality, retrying standard quality',
-        error,
-      )
+      console.warn('按当前画质保存合成照片失败，正在尝试标准画质', error)
       return saveComposedAsset('standard')
     }
   }
 
-  const saveSeparatePhotos = async (photos: CapturedPhotoFiles) => {
+  const saveSeparatePhotos = async (
+    photos: CapturedPhotoFiles,
+    previewTaskId: number,
+  ) => {
     const hasSavePermission = await requestGallerySavePermission()
     if (!hasSavePermission) {
-      console.warn('No permission to save photos')
+      console.warn('没有保存照片的权限')
       trackCaptureAnalytics(trackSavePermissionDenied)
       return false
     }
@@ -2726,13 +2756,17 @@ const DualCamera = () => {
     const assets = await saveSeparatePhotoAssets(photos)
     await markSavedGalleryAssets(assets, 'singlePhoto')
     prependGalleryAssets(assets.map(asset => ({ asset, kind: 'singlePhoto' })))
+    if (assets[0]) replaceGalleryPreviewWithAsset(assets[0], previewTaskId)
     return true
   }
 
-  const saveCombinedPhoto = async (photos: CapturedPhotoFiles) => {
+  const saveCombinedPhoto = async (
+    photos: CapturedPhotoFiles,
+    previewTaskId: number,
+  ) => {
     const hasSavePermission = await requestGallerySavePermission()
     if (!hasSavePermission) {
-      console.warn('No permission to save combined photo')
+      console.warn('没有保存合成照片的权限')
       trackCaptureAnalytics(trackSavePermissionDenied)
       return false
     }
@@ -2740,13 +2774,17 @@ const DualCamera = () => {
     const asset = await saveCombinedPhotoAsset(photos)
     await markSavedGalleryAssets([asset], 'dualPhoto')
     prependGalleryAssets([{ asset, kind: 'dualPhoto' }])
+    replaceGalleryPreviewWithAsset(asset, previewTaskId)
     return true
   }
 
-  const saveNativeCombinedPhoto = async (combinedUri: string) => {
+  const saveNativeCombinedPhoto = async (
+    combinedUri: string,
+    previewTaskId: number,
+  ) => {
     const hasSavePermission = await requestGallerySavePermission()
     if (!hasSavePermission) {
-      console.warn('No permission to save native combined photo')
+      console.warn('没有保存原生合成照片的权限')
       trackCaptureAnalytics(trackSavePermissionDenied)
       return false
     }
@@ -2757,13 +2795,17 @@ const DualCamera = () => {
     })
     await markSavedGalleryAssets([asset], 'dualPhoto')
     prependGalleryAssets([{ asset, kind: 'dualPhoto' }])
+    replaceGalleryPreviewWithAsset(asset, previewTaskId)
     return true
   }
 
-  const saveCombinedAndSeparatePhotos = async (photos: CapturedPhotoFiles) => {
+  const saveCombinedAndSeparatePhotos = async (
+    photos: CapturedPhotoFiles,
+    previewTaskId: number,
+  ) => {
     const hasSavePermission = await requestGallerySavePermission()
     if (!hasSavePermission) {
-      console.warn('No permission to save combined and separate photos')
+      console.warn('没有保存合成照片和单摄照片的权限')
       trackCaptureAnalytics(trackSavePermissionDenied)
       return false
     }
@@ -2776,12 +2818,16 @@ const DualCamera = () => {
       { asset: combinedAsset, kind: 'dualPhoto' },
       ...separateAssets.map(asset => ({ asset, kind: 'singlePhoto' as const })),
     ])
+    replaceGalleryPreviewWithAsset(combinedAsset, previewTaskId)
     return true
   }
 
   const captureNativePhoto = async () => {
     if (captureBusyRef.current) return
     captureBusyRef.current = true
+    let combinedUri: string | undefined
+    let previewTaskId: number | undefined
+    let captureReleased = false
 
     const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
     const outputAspectRatio =
@@ -2799,7 +2845,7 @@ const DualCamera = () => {
       }
 
       runCaptureAnimation()
-      showSaveFeedback('saving')
+      setSaveFeedback(null)
       setCaptureBusy(true)
 
       const result = await NativeDualCameraController.capturePhoto({
@@ -2817,14 +2863,18 @@ const DualCamera = () => {
         pipBorderVisible,
       })
 
-      const combinedUri =
-        typeof result === 'string' ? result : result.combinedUri
+      combinedUri = typeof result === 'string' ? result : result.combinedUri
 
       if (!combinedUri) {
         throw new Error('原生拍照没有返回有效图片路径')
       }
 
-      const saved = await saveNativeCombinedPhoto(combinedUri)
+      previewTaskId = showLocalGalleryPreview(combinedUri, 'photo')
+
+      captureBusyRef.current = false
+      setCaptureBusy(false)
+      captureReleased = true
+      const saved = await saveNativeCombinedPhoto(combinedUri, previewTaskId)
       if (saved) {
         trackCaptureAnalytics(() =>
           trackPhotoSaved({
@@ -2835,15 +2885,18 @@ const DualCamera = () => {
           }),
         )
       }
-      showSaveFeedback(saved ? 'saved' : 'failed')
-      await safeUnlinkFile(combinedUri)
+      if (!saved) clearGalleryPreview(previewTaskId)
     } catch (error) {
-      console.warn('Native dual camera capture failed', error)
+      console.warn('原生双摄拍照失败', error)
       trackCaptureAnalytics(() => trackCaptureFailure('photo'))
       showSaveFeedback('failed')
+      if (previewTaskId !== undefined) clearGalleryPreview(previewTaskId)
     } finally {
-      captureBusyRef.current = false
-      setCaptureBusy(false)
+      await safeUnlinkFile(combinedUri)
+      if (!captureReleased) {
+        captureBusyRef.current = false
+        setCaptureBusy(false)
+      }
     }
   }
 
@@ -2859,12 +2912,14 @@ const DualCamera = () => {
     }
 
     let photos: CapturedPhotoFiles | null = null
+    let previewTaskId: number | undefined
+    let captureReleased = false
     const captureStartedAt = Date.now()
 
     try {
       const captureLocation = await resolveCaptureLocation()
       runCaptureAnimation()
-      showSaveFeedback('saving')
+      setSaveFeedback(null)
       setCaptureBusy(true)
       const photoLocation = captureLocation as Location | undefined
       const rearPhoto = await rearPhotoOutput.capturePhotoToFile(
@@ -2889,14 +2944,18 @@ const DualCamera = () => {
         front: toFileUri(frontPhoto.filePath),
         capturedAt: new Date().toLocaleString(),
       }
+      previewTaskId = showLocalGalleryPreview(photos.rear, 'photo')
+      captureBusyRef.current = false
+      setCaptureBusy(false)
+      captureReleased = true
 
       let saved = false
       if (photoSaveMode === 'combined') {
-        saved = await saveCombinedPhoto(photos)
+        saved = await saveCombinedPhoto(photos, previewTaskId)
       } else if (photoSaveMode === 'separate') {
-        saved = await saveSeparatePhotos(photos)
+        saved = await saveSeparatePhotos(photos, previewTaskId)
       } else {
-        saved = await saveCombinedAndSeparatePhotos(photos)
+        saved = await saveCombinedAndSeparatePhotos(photos, previewTaskId)
       }
 
       if (saved) {
@@ -2909,18 +2968,24 @@ const DualCamera = () => {
           }),
         )
       }
-      showSaveFeedback(saved ? 'saved' : 'failed')
+      if (!saved) {
+        clearGalleryPreview(previewTaskId)
+        showSaveFeedback('failed')
+      }
     } catch (error) {
-      console.warn('Dual camera capture failed', error)
+      console.warn('双摄拍照失败', error)
       trackCaptureAnalytics(() => trackCaptureFailure('photo'))
       showSaveFeedback('failed')
+      if (previewTaskId !== undefined) clearGalleryPreview(previewTaskId)
     } finally {
       if (photos) {
         await safeUnlinkFile(photos.rear)
         await safeUnlinkFile(photos.front)
       }
-      captureBusyRef.current = false
-      setCaptureBusy(false)
+      if (!captureReleased) {
+        captureBusyRef.current = false
+        setCaptureBusy(false)
+      }
     }
   }
 
@@ -3039,7 +3104,7 @@ const DualCamera = () => {
         rear: rearVideoOutput,
         ...(frontVideoOutput ? { front: frontVideoOutput } : {}),
       }
-      console.info('Configured video session outputs', {
+      console.info('录像会话输出配置完成', {
         requestedResolution: selectedVideoConfig.label,
         requestedFrameRate: videoFrameRate,
         rearCurrentResolution: rearVideoOutput.currentResolution,
@@ -3099,7 +3164,7 @@ const DualCamera = () => {
     try {
       return await configurePromise
     } catch (error) {
-      console.warn('Configure dual video session failed', error)
+      console.warn('配置双摄录像会话失败', error)
       videoOutputsRef.current = {}
       setVideoCaptureReady(false)
       if (stabilizationMode !== 'off') {
@@ -3218,18 +3283,33 @@ const DualCamera = () => {
           throw new Error('原生录像模块未注册成功')
         }
 
+        const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
+        const outputAspectRatio =
+          resolvePhotoOutputAspectRatio({ ratio, previewSize }) || 0
+
         await NativeDualCameraController.startVideoRecording({
           resolution: videoResolution,
           frameRate: videoFrameRate,
           audioEnabled: audioChannelMode !== 'off',
           audioChannels: audioChannelMode === 'mono' ? 1 : 2,
           audioSampleRate: audioSampleRateByQuality[audioQualityMode],
+          saveMode: videoSaveMode,
+          layout: effectiveDualVideoComposeMode,
+          primaryCamera,
+          pipX: localPipPosition.x,
+          pipY: localPipPosition.y,
+          pipWidth: pipSize.width,
+          pipHeight: pipSize.height,
+          previewWidth: previewSize.width,
+          previewHeight: previewSize.height,
+          aspectRatio: outputAspectRatio,
+          pipBorderVisible,
         })
         setRecordingSeconds(0)
         setRecording(true)
         setVideoCaptureReady(true)
       } catch (error) {
-        console.warn('Start native dual video recording failed', error)
+        console.warn('启动原生双摄录像失败', error)
       } finally {
         setRecordingBusy(false)
       }
@@ -3255,21 +3335,21 @@ const DualCamera = () => {
             audioSampleRateByQuality[audioQualityMode],
           )
         } catch (error) {
-          console.warn('Prepare recording audio failed', error)
+          console.warn('准备录像音频失败', error)
         }
       }
 
       const captureLocation = await resolveCaptureLocation()
       const configured = await configureVideoSession()
       if (!configured) {
-        console.warn('Dual video recording is not available on this device')
+        console.warn('当前设备无法进行双摄录像')
         return
       }
 
       const rearVideoOutput = videoOutputsRef.current.rear
       const frontVideoOutput = videoOutputsRef.current.front
       if (previewStatus !== 'ready' || !rearVideoOutput || !frontVideoOutput) {
-        console.warn('Dual video recording is not available on this session')
+        console.warn('当前相机会话无法进行双摄录像')
         return
       }
 
@@ -3315,7 +3395,7 @@ const DualCamera = () => {
       setRecordingSeconds(0)
       setRecording(true)
     } catch (error) {
-      console.warn('Start dual video recording failed', error)
+      console.warn('启动双摄录像失败', error)
       recordersRef.current = {}
       recordingFinishedRef.current = []
     } finally {
@@ -3351,7 +3431,7 @@ const DualCamera = () => {
         if (videoWarmupPendingRef.current) {
           videoWarmupPendingRef.current = false
         }
-        console.warn('Warm up dual video session failed', error)
+        console.warn('预热双摄录像会话失败', error)
       }
     }
 
@@ -3377,7 +3457,7 @@ const DualCamera = () => {
   ])
 
   const enterVideoMode = () => {
-    flashModeTransition(() => {
+    const switchMode = () => {
       setMode('video')
       if (nativeDualCameraEnabled) {
         if (previewStatus === 'ready') {
@@ -3391,7 +3471,13 @@ const DualCamera = () => {
         videoWarmupPendingRef.current = true
         showControlStatusMessage('正在准备录像')
       }
-    })
+    }
+
+    if (nativeDualCameraEnabled) {
+      switchMode()
+    } else {
+      void flashModeTransition(switchMode)
+    }
   }
 
   const togglePreviewLayout = () => {
@@ -3415,25 +3501,43 @@ const DualCamera = () => {
     if (!recording || recordingBusy) return
 
     if (nativeDualCameraEnabled) {
+      const recordedVideoUris: string[] = []
+      let previewTaskId: number | undefined
+      let controlsReleased = false
       try {
         const saveStartedAt = Date.now()
         setRecordingBusy(true)
-        showSaveFeedback('saving')
+        setSaveFeedback(null)
 
         if (!NativeDualCameraController?.stopVideoRecording) {
           throw new Error('原生停止录像模块未注册成功')
         }
 
         const videos = await NativeDualCameraController.stopVideoRecording()
+        recordedVideoUris.push(
+          ...videos.map(video => toFileUri(video.filePath)),
+        )
+        const previewVideo =
+          videos.find(video => video.side === 'combined') ||
+          videos.find(video => video.side === primaryCamera) ||
+          videos[0]
+        if (previewVideo) {
+          previewTaskId = showLocalGalleryPreview(
+            toFileUri(previewVideo.filePath),
+            'video',
+          )
+        }
         setRecording(false)
         setRecordingSeconds(0)
+        setRecordingBusy(false)
+        controlsReleased = true
 
         const videoFiles = (
           await Promise.all(
             videos.map(async video => {
               const fileInfo = await getExistingFileInfo(video.filePath)
               if (!fileInfo || fileInfo.size <= 0) {
-                console.warn('Recorded native video file is missing or empty', video)
+                console.warn('原生录像文件不存在或内容为空', video)
                 return null
               }
 
@@ -3448,14 +3552,15 @@ const DualCamera = () => {
         ).filter((video): video is RecordedVideoFile => video !== null)
 
         if (videoFiles.length === 0) {
-          throw new Error('No valid native video file was recorded.')
+          throw new Error('原生录像没有生成有效视频文件。')
         }
 
         const hasSavePermission = await requestGallerySavePermission()
         if (!hasSavePermission) {
-          console.warn('No permission to save native videos')
+          console.warn('没有保存原生录像的权限')
           trackCaptureAnalytics(trackSavePermissionDenied)
           showSaveFeedback('failed')
+          if (previewTaskId !== undefined) clearGalleryPreview(previewTaskId)
           return
         }
 
@@ -3467,7 +3572,7 @@ const DualCamera = () => {
             })
           } catch (error) {
             console.warn(
-              'Save native video to DualCam album failed, retrying library',
+              '保存原生录像到双摄相册失败，正在尝试保存到系统相册',
               error,
             )
             return CameraRoll.saveAsset(uri, {
@@ -3476,32 +3581,19 @@ const DualCamera = () => {
           }
         }
         const saveSeparateVideoAssets = () =>
-          Promise.all(videoFiles.map(video => saveVideoAsset(video.uri)))
+          Promise.all(
+            videoFiles
+              .filter(video => video.side !== 'combined')
+              .map(video => saveVideoAsset(video.uri)),
+          )
         const saveCombinedVideoAsset = async () => {
-          const hasRearVideo = videoFiles.some(video => video.side === 'rear')
-          const hasFrontVideo = videoFiles.some(video => video.side === 'front')
-          if (!hasRearVideo || !hasFrontVideo) {
-            throw new Error(
-              'Combined video requires both rear and front recordings.',
-            )
+          const combinedVideo = videoFiles.find(
+            video => video.side === 'combined',
+          )
+          if (!combinedVideo) {
+            throw new Error('实时合成视频不可用。')
           }
-
-          const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
-          const combinedVideoUri = await composeDualVideo({
-            videos: videoFiles,
-            layout: effectiveDualVideoComposeMode,
-            primaryCamera,
-            pipPosition: localPipPosition,
-            pipSize,
-            previewSize,
-            ratio,
-            pipBorderVisible,
-          })
-          try {
-            return await saveVideoAsset(combinedVideoUri)
-          } finally {
-            await safeUnlinkFile(combinedVideoUri)
-          }
+          return saveVideoAsset(combinedVideo.uri)
         }
 
         let usedFallbackSave = false
@@ -3515,10 +3607,7 @@ const DualCamera = () => {
               ...(await saveSeparateVideoAssets()),
             ]
           } catch (error) {
-            console.warn(
-              'Combined native video save failed, saving separate videos',
-              error,
-            )
+            console.warn('保存原生合成视频失败，改为保存单路视频', error)
             usedFallbackSave = true
             assets = await saveSeparateVideoAssets()
           }
@@ -3527,7 +3616,7 @@ const DualCamera = () => {
         }
 
         if (assets.length === 0) {
-          throw new Error('No native video asset was saved.')
+          throw new Error('未保存任何原生录像资源。')
         }
 
         await markSavedGalleryAssets(assets, 'video')
@@ -3541,19 +3630,22 @@ const DualCamera = () => {
             durationMs: Date.now() - saveStartedAt,
           }),
         )
-        showSaveFeedback(usedFallbackSave ? 'fallback' : 'saved')
-
-        await Promise.all(
-          videoFiles.map(video => safeUnlinkFile(video.uri)),
-        )
+        if (usedFallbackSave) showSaveFeedback('fallback')
+        if (assets[0]) {
+          replaceGalleryPreviewWithAsset(assets[0], previewTaskId)
+        }
       } catch (error) {
-        console.warn('Stop native dual video recording failed', error)
+        console.warn('停止原生双摄录像失败', error)
         trackCaptureAnalytics(() => trackCaptureFailure('video'))
         showSaveFeedback('failed')
+        if (previewTaskId !== undefined) clearGalleryPreview(previewTaskId)
       } finally {
-        setRecording(false)
-        setRecordingSeconds(0)
-        setRecordingBusy(false)
+        await Promise.all(recordedVideoUris.map(uri => safeUnlinkFile(uri)))
+        if (!controlsReleased) {
+          setRecording(false)
+          setRecordingSeconds(0)
+          setRecordingBusy(false)
+        }
       }
       return
     }
@@ -3563,11 +3655,11 @@ const DualCamera = () => {
     try {
       const saveStartedAt = Date.now()
       setRecordingBusy(true)
-      showSaveFeedback('saving')
+      setSaveFeedback(null)
       await Promise.all(
         [recorders.rear, recorders.front].map(recorder =>
           recorder?.stopRecording().catch(error => {
-            console.warn('Stop recorder failed', error)
+            console.warn('停止录像器失败', error)
           }),
         ),
       )
@@ -3584,7 +3676,7 @@ const DualCamera = () => {
 
       finishResults.forEach(result => {
         if (result.status === 'rejected') {
-          console.warn('Video recording output failed', result.reason)
+          console.warn('录像输出失败', result.reason)
         }
       })
 
@@ -3593,7 +3685,7 @@ const DualCamera = () => {
           videos.map(async video => {
             const fileInfo = await getExistingFileInfo(video.filePath)
             if (!fileInfo || fileInfo.size <= 0) {
-              console.warn('Recorded video file is missing or empty', video)
+              console.warn('录像文件不存在或内容为空', video)
               return null
             }
 
@@ -3605,14 +3697,17 @@ const DualCamera = () => {
           }),
         )
       ).filter((video): video is RecordedVideoFile => video !== null)
+      const previewVideo =
+        videoFiles.find(video => video.side === primaryCamera) || videoFiles[0]
+      if (previewVideo) showLocalGalleryPreview(previewVideo.uri, 'video')
 
       if (videoFiles.length === 0) {
-        throw new Error('No valid video file was recorded.')
+        throw new Error('录像没有生成有效视频文件。')
       }
 
       const hasSavePermission = await requestGallerySavePermission()
       if (!hasSavePermission) {
-        console.warn('No permission to save videos')
+        console.warn('没有保存录像的权限')
         trackCaptureAnalytics(trackSavePermissionDenied)
         showSaveFeedback('failed')
         return
@@ -3625,10 +3720,7 @@ const DualCamera = () => {
             album: albumName,
           })
         } catch (error) {
-          console.warn(
-            'Save video to DualCam album failed, retrying library',
-            error,
-          )
+          console.warn('保存录像到双摄相册失败，正在尝试保存到系统相册', error)
           return CameraRoll.saveAsset(uri, {
             type: 'video',
           })
@@ -3641,12 +3733,12 @@ const DualCamera = () => {
         const hasFrontVideo = videoFiles.some(video => video.side === 'front')
         if (!hasRearVideo || !hasFrontVideo) {
           throw new Error(
-            'Combined video requires both rear and front recordings.',
+            '合成视频需要同时具有前摄和后摄录像。',
           )
         }
 
         const { previewSize, localPipPosition } = getPrimaryPreviewMetrics()
-        console.info('Saving dual video with native composer', {
+        console.info('使用原生合成器保存双摄视频', {
           videoSaveMode,
           dualVideoComposeMode: effectiveDualVideoComposeMode,
           primaryCamera,
@@ -3655,7 +3747,10 @@ const DualCamera = () => {
           pipSize,
         })
         const combinedVideoUri = await composeDualVideo({
-          videos: videoFiles,
+          videos: videoFiles.filter(
+            (video): video is RecordedVideoFile & { side: CameraSide } =>
+              video.side !== 'combined',
+          ),
           layout: effectiveDualVideoComposeMode,
           primaryCamera,
           pipPosition: localPipPosition,
@@ -3667,7 +3762,7 @@ const DualCamera = () => {
         const combinedFileInfo = await getExistingFileInfo(combinedVideoUri)
         if (!combinedFileInfo || combinedFileInfo.size <= 0) {
           await safeUnlinkFile(combinedVideoUri)
-          throw new Error('Combined video export did not create a valid file.')
+          throw new Error('合成视频导出未生成有效文件。')
         }
 
         return saveVideoAsset(combinedFileInfo.uri).finally(() =>
@@ -3686,10 +3781,7 @@ const DualCamera = () => {
             ...(await saveSeparateVideoAssets()),
           ]
         } catch (error) {
-          console.warn(
-            'Combined video save failed, saving separate videos',
-            error,
-          )
+          console.warn('保存合成视频失败，改为保存单路视频', error)
           usedFallbackSave = true
           assets = await saveSeparateVideoAssets()
         }
@@ -3698,7 +3790,7 @@ const DualCamera = () => {
       }
 
       if (assets.length === 0) {
-        throw new Error('No video asset was saved.')
+        throw new Error('未保存任何视频资源。')
       }
 
       await markSavedGalleryAssets(assets, 'video')
@@ -3712,11 +3804,13 @@ const DualCamera = () => {
           durationMs: Date.now() - saveStartedAt,
         }),
       )
-      showSaveFeedback(usedFallbackSave ? 'fallback' : 'saved')
+      if (usedFallbackSave) showSaveFeedback('fallback')
+      if (assets[0]) replaceGalleryPreviewWithAsset(assets[0])
     } catch (error) {
-      console.warn('Stop dual video recording failed', error)
+      console.warn('停止双摄录像失败', error)
       trackCaptureAnalytics(() => trackCaptureFailure('video'))
       showSaveFeedback('failed')
+      clearGalleryPreview()
     } finally {
       await Promise.all(
         finishPromises.map(async promise => {
@@ -3812,7 +3906,11 @@ const DualCamera = () => {
       >
         {nativeDualCameraEnabled ? (
           <CameraPane
-            label={layout === 'split' ? `${primaryLabel} / ${secondaryLabel}` : primaryLabel}
+            label={
+              layout === 'split'
+                ? `${primaryLabel} / ${secondaryLabel}`
+                : primaryLabel
+            }
             previewContent={
               <NativeDualCameraPreview
                 style={StyleSheet.absoluteFillObject}
@@ -3884,6 +3982,19 @@ const DualCamera = () => {
             onDoubleTap={handlePrimaryPreviewDoubleTap}
             tapFocusPoint={tapFocusPoint}
             full
+          />
+        )}
+
+        {nativeDualCameraEnabled && isPip && (
+          <View
+            style={[
+              styles.nativePipGestureLayer,
+              {
+                left: pipPosition.x,
+                top: pipPosition.y,
+              },
+            ]}
+            {...pipPanResponder.panHandlers}
           />
         )}
 
@@ -3969,7 +4080,7 @@ const DualCamera = () => {
         {panel === 'zoom' && (
           <LensPickerPanel
             top={insets.top + 68}
-            lensOptions={lensOptions}
+            lensOptions={localizedLensOptions}
             selectedLensId={selectedLensId}
             onSelectLens={selectLens}
           />
@@ -4079,6 +4190,7 @@ const DualCamera = () => {
             recordingSeconds={recordingSeconds}
             captureBusy={captureBusy}
             recordingBusy={recordingBusy}
+            galleryPreview={galleryPreview}
             shutterScale={shutterScale}
             horizontalInset={homeControlsHorizontalInset}
             reduceTransparency={reduceTransparencyEnabled}
@@ -4086,10 +4198,15 @@ const DualCamera = () => {
               if (recording) {
                 stopVideoRecording()
               }
-              flashModeTransition(() => {
+              const switchMode = () => {
                 videoWarmupPendingRef.current = false
                 setMode('photo')
-              })
+              }
+              if (nativeDualCameraEnabled) {
+                switchMode()
+              } else {
+                void flashModeTransition(switchMode)
+              }
             }}
             onSetVideoMode={enterVideoMode}
             onToggleLayout={togglePreviewLayout}
@@ -4391,6 +4508,7 @@ const DualCamera = () => {
         assets={galleryAssets}
         loading={galleryLoading}
         onClose={() => setGalleryOpen(false)}
+        onDelete={deleteGalleryAssets}
       />
     </View>
   )
@@ -4435,6 +4553,13 @@ const styles = StyleSheet.create({
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
     elevation: 8,
+  },
+  nativePipGestureLayer: {
+    position: 'absolute',
+    width: pipSize.width,
+    height: pipSize.height,
+    borderRadius: pipCornerRadius,
+    zIndex: 4,
   },
   pipNoBorder: {
     padding: 0,

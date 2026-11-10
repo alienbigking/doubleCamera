@@ -101,7 +101,6 @@ const createInitialStats = (): CaptureAnalyticsStats => {
     videoResolutionUsage: {
       '720p': 0,
       '1080p': 0,
-      '4k': 0,
     },
     videoSaveModeUsage: {
       combined: 0,

@@ -21,7 +21,7 @@ const RootContainer = () => {
 
     initI18n()
       .catch(error => {
-        console.warn('Initialize i18n failed', error)
+        console.warn('初始化多语言失败', error)
       })
       .finally(() => {
         if (mounted) setI18nReady(true)

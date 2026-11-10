@@ -29,10 +29,7 @@ const getRNLocalize = (): LocalizeModule | null => {
     const localize = require('react-native-localize') as LocalizeModule
     return localize
   } catch (error) {
-    console.warn(
-      'react-native-localize is unavailable, fallback to default',
-      error,
-    )
+    console.warn('react-native-localize 不可用，已回退到默认语言', error)
     return null
   }
 }

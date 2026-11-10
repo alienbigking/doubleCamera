@@ -18,6 +18,17 @@
 		7620010D2F1A0007006654EE /* DualPhotoComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7620010C2F1A0007006654EE /* DualPhotoComposer.swift */; };
 		7620010F2F1A0008006654EE /* DualPhotoComposerBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 7620010E2F1A0008006654EE /* DualPhotoComposerBridge.m */; };
 		762001112F1A0009006654EE /* NativeDualCameraView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001102F1A0009006654EE /* NativeDualCameraView.swift */; };
+		762001132F1A000B006654EE /* NativeDualCameraViewManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001142F1A000B006654EE /* NativeDualCameraViewManager.swift */; };
+		762001152F1A000C006654EE /* NativeDualCameraPhotoPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001162F1A000C006654EE /* NativeDualCameraPhotoPipeline.swift */; };
+		762001172F1A000D006654EE /* NativeDualCameraVideoPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001182F1A000D006654EE /* NativeDualCameraVideoPipeline.swift */; };
+		762001192F1A000E006654EE /* NativeDualCameraSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7620011A2F1A000E006654EE /* NativeDualCameraSession.swift */; };
+		7620011B2F1A000F006654EE /* NativeDualCameraImageComposition.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7620011C2F1A000F006654EE /* NativeDualCameraImageComposition.swift */; };
+		7620011D2F1A0010006654EE /* NativeCameraTestModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7620011E2F1A0010006654EE /* NativeCameraTestModule.swift */; };
+		7620011F2F1A0011006654EE /* NativeDualCameraLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001202F1A0011006654EE /* NativeDualCameraLayout.swift */; };
+		762001212F1A0012006654EE /* NativeDualCameraFocus.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001222F1A0012006654EE /* NativeDualCameraFocus.swift */; };
+		762001232F1A0013006654EE /* NativeDualCameraAudioPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001242F1A0013006654EE /* NativeDualCameraAudioPipeline.swift */; };
+		762001252F1A0014006654EE /* NativeDualCameraPreviewPipeline.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001262F1A0014006654EE /* NativeDualCameraPreviewPipeline.swift */; };
+		762001272F1A0015006654EE /* NativeDualCameraWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 762001282F1A0015006654EE /* NativeDualCameraWriter.swift */; };
 		762001132F1A000A006654EE /* NativeDualCameraViewBridge.m in Sources */ = {isa = PBXBuildFile; fileRef = 762001122F1A000A006654EE /* NativeDualCameraViewBridge.m */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		8A488C4C24E620A660F72D6E /* libPods-doubleCamera.a in Frameworks */ = {isa = PBXBuildFile; fileRef = FE4C9C9F0114384DAD2A46A6 /* libPods-doubleCamera.a */; };
@@ -41,6 +52,17 @@
 		7620010C2F1A0007006654EE /* DualPhotoComposer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = DualPhotoComposer.swift; path = doubleCamera/DualPhotoComposer.swift; sourceTree = "<group>"; };
 		7620010E2F1A0008006654EE /* DualPhotoComposerBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = DualPhotoComposerBridge.m; path = doubleCamera/DualPhotoComposerBridge.m; sourceTree = "<group>"; };
 		762001102F1A0009006654EE /* NativeDualCameraView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraView.swift; path = doubleCamera/NativeDualCameraView.swift; sourceTree = "<group>"; };
+		762001142F1A000B006654EE /* NativeDualCameraViewManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraViewManager.swift; path = doubleCamera/NativeDualCameraViewManager.swift; sourceTree = "<group>"; };
+		762001162F1A000C006654EE /* NativeDualCameraPhotoPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraPhotoPipeline.swift; path = doubleCamera/NativeDualCameraPhotoPipeline.swift; sourceTree = "<group>"; };
+		762001182F1A000D006654EE /* NativeDualCameraVideoPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraVideoPipeline.swift; path = doubleCamera/NativeDualCameraVideoPipeline.swift; sourceTree = "<group>"; };
+		7620011A2F1A000E006654EE /* NativeDualCameraSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraSession.swift; path = doubleCamera/NativeDualCameraSession.swift; sourceTree = "<group>"; };
+		7620011C2F1A000F006654EE /* NativeDualCameraImageComposition.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraImageComposition.swift; path = doubleCamera/NativeDualCameraImageComposition.swift; sourceTree = "<group>"; };
+		7620011E2F1A0010006654EE /* NativeCameraTestModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeCameraTestModule.swift; path = doubleCamera/NativeCameraTestModule.swift; sourceTree = "<group>"; };
+		762001202F1A0011006654EE /* NativeDualCameraLayout.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraLayout.swift; path = doubleCamera/NativeDualCameraLayout.swift; sourceTree = "<group>"; };
+		762001222F1A0012006654EE /* NativeDualCameraFocus.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraFocus.swift; path = doubleCamera/NativeDualCameraFocus.swift; sourceTree = "<group>"; };
+		762001242F1A0013006654EE /* NativeDualCameraAudioPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraAudioPipeline.swift; path = doubleCamera/NativeDualCameraAudioPipeline.swift; sourceTree = "<group>"; };
+		762001262F1A0014006654EE /* NativeDualCameraPreviewPipeline.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraPreviewPipeline.swift; path = doubleCamera/NativeDualCameraPreviewPipeline.swift; sourceTree = "<group>"; };
+		762001282F1A0015006654EE /* NativeDualCameraWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = NativeDualCameraWriter.swift; path = doubleCamera/NativeDualCameraWriter.swift; sourceTree = "<group>"; };
 		762001122F1A000A006654EE /* NativeDualCameraViewBridge.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = NativeDualCameraViewBridge.m; path = doubleCamera/NativeDualCameraViewBridge.m; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = doubleCamera/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A90794981F064F2013ADE0BD /* Pods-doubleCamera.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-doubleCamera.debug.xcconfig"; path = "Target Support Files/Pods-doubleCamera/Pods-doubleCamera.debug.xcconfig"; sourceTree = "<group>"; };
@@ -52,8 +74,6 @@
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		ADF8E7A52F164BB900E77C98 /* launch.imageset */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
-			exceptions = (
-			);
 			path = launch.imageset;
 			sourceTree = "<group>";
 		};
@@ -86,6 +106,17 @@
 				762001082F1A0005006654EE /* NativeBlurView.swift */,
 				7620010A2F1A0006006654EE /* NativeBlurViewBridge.m */,
 				762001102F1A0009006654EE /* NativeDualCameraView.swift */,
+				762001142F1A000B006654EE /* NativeDualCameraViewManager.swift */,
+				762001162F1A000C006654EE /* NativeDualCameraPhotoPipeline.swift */,
+				762001182F1A000D006654EE /* NativeDualCameraVideoPipeline.swift */,
+				7620011A2F1A000E006654EE /* NativeDualCameraSession.swift */,
+				7620011C2F1A000F006654EE /* NativeDualCameraImageComposition.swift */,
+				7620011E2F1A0010006654EE /* NativeCameraTestModule.swift */,
+				762001202F1A0011006654EE /* NativeDualCameraLayout.swift */,
+				762001222F1A0012006654EE /* NativeDualCameraFocus.swift */,
+				762001242F1A0013006654EE /* NativeDualCameraAudioPipeline.swift */,
+				762001262F1A0014006654EE /* NativeDualCameraPreviewPipeline.swift */,
+				762001282F1A0015006654EE /* NativeDualCameraWriter.swift */,
 				762001122F1A000A006654EE /* NativeDualCameraViewBridge.m */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
@@ -240,9 +271,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-doubleCamera/Pods-doubleCamera-frameworks-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Embed Pods Frameworks";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-doubleCamera/Pods-doubleCamera-frameworks-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -279,9 +314,13 @@
 			inputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-doubleCamera/Pods-doubleCamera-resources-${CONFIGURATION}-input-files.xcfilelist",
 			);
+			inputPaths = (
+			);
 			name = "[CP] Copy Pods Resources";
 			outputFileListPaths = (
 				"${PODS_ROOT}/Target Support Files/Pods-doubleCamera/Pods-doubleCamera-resources-${CONFIGURATION}-output-files.xcfilelist",
+			);
+			outputPaths = (
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
@@ -305,6 +344,17 @@
 				762001092F1A0005006654EE /* NativeBlurView.swift in Sources */,
 				7620010B2F1A0006006654EE /* NativeBlurViewBridge.m in Sources */,
 				762001112F1A0009006654EE /* NativeDualCameraView.swift in Sources */,
+				762001132F1A000B006654EE /* NativeDualCameraViewManager.swift in Sources */,
+				762001152F1A000C006654EE /* NativeDualCameraPhotoPipeline.swift in Sources */,
+				762001172F1A000D006654EE /* NativeDualCameraVideoPipeline.swift in Sources */,
+				762001192F1A000E006654EE /* NativeDualCameraSession.swift in Sources */,
+				7620011B2F1A000F006654EE /* NativeDualCameraImageComposition.swift in Sources */,
+				7620011D2F1A0010006654EE /* NativeCameraTestModule.swift in Sources */,
+				7620011F2F1A0011006654EE /* NativeDualCameraLayout.swift in Sources */,
+				762001212F1A0012006654EE /* NativeDualCameraFocus.swift in Sources */,
+				762001232F1A0013006654EE /* NativeDualCameraAudioPipeline.swift in Sources */,
+				762001252F1A0014006654EE /* NativeDualCameraPreviewPipeline.swift in Sources */,
+				762001272F1A0015006654EE /* NativeDualCameraWriter.swift in Sources */,
 				762001132F1A000A006654EE /* NativeDualCameraViewBridge.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -334,7 +384,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.doublecamera.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.skqy.doublecamera.app;
 				PRODUCT_NAME = doubleCamera;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;
@@ -363,7 +413,7 @@
 					"-ObjC",
 					"-lc++",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.doublecamera.app;
+				PRODUCT_BUNDLE_IDENTIFIER = com.skqy.doublecamera.app;
 				PRODUCT_NAME = doubleCamera;
 				SWIFT_VERSION = 5.0;
 				VERSIONING_SYSTEM = "apple-generic";

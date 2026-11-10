@@ -34,3 +34,14 @@ export const markGalleryAssets = async (
 
   await AsyncStorage.setItem(galleryAssetIndexKey, JSON.stringify(index))
 }
+
+export const removeGalleryAssets = async (ids: string[]) => {
+  if (ids.length === 0) return
+
+  const index = await readGalleryAssetIndex()
+  ids.forEach(id => {
+    delete index[id]
+  })
+
+  await AsyncStorage.setItem(galleryAssetIndexKey, JSON.stringify(index))
+}

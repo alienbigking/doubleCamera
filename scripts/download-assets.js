@@ -19,13 +19,13 @@ function downloadImage(url, filename) {
         response.pipe(file)
         file.on('finish', () => {
           file.close()
-          console.log(`✅ Downloaded: ${filename}`)
+          console.log(`✅ 已下载：${filename}`)
           resolve(filePath)
         })
       })
       .on('error', err => {
         fs.unlink(filePath, () => {})
-        console.error(`❌ Error downloading ${filename}:`, err.message)
+        console.error(`❌ 下载 ${filename} 失败：`, err.message)
         reject(err)
       })
   })
@@ -39,10 +39,10 @@ async function downloadLoginBackground() {
       'https://images.unsplash.com/photo-1519681393784-d120267933ba?w=800&h=1200&fit=crop&auto=format'
     await downloadImage(loginBgUrl, '2.png')
 
-    console.log('🎉 Login background downloaded successfully!')
-    console.log('📍 Location: src/assets/images/2.png')
+    console.log('🎉 登录背景图片下载成功！')
+    console.log('📍 文件位置：src/assets/images/2.png')
   } catch (error) {
-    console.error('💥 Failed to download login background:', error.message)
+    console.error('💥 下载登录背景图片失败：', error.message)
   }
 }
 

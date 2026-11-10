@@ -19,8 +19,7 @@ import type {
 } from './types'
 import { TopMenuPanelShell } from './topMenuPanelShell'
 
-const formatVideoResolution = (mode: VideoResolutionMode) =>
-  mode === '4k' ? '1080p' : mode
+const formatVideoResolution = (mode: VideoResolutionMode) => mode
 
 const formatVideoFrameRate = (fps: VideoFrameRateMode) => `${fps}fps`
 const formatAudioChannel = (

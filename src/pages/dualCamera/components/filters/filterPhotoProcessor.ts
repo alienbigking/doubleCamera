@@ -1,3 +1,4 @@
+// 静态照片滤镜处理：从本地文件加载图像、应用滤镜并导出处理结果。
 import RNFS from 'react-native-fs'
 import {
   Skia,
@@ -52,7 +53,7 @@ const loadImage = async (uri: string): Promise<LoadedImage> => {
   }
 
   directData?.dispose()
-  throw new Error(`Failed to decode image without Base64 fallback: ${uri}`)
+  throw new Error(`图片解码失败，未启用 Base64 回退：${uri}`)
 }
 
 const fitCanvasSize = (
@@ -170,7 +171,7 @@ export const applyFilterToPhoto = async (
     const surface = Skia.Surface.MakeOffscreen(size.width, size.height)
 
     if (!surface) {
-      throw new Error('Failed to create Skia surface for filter output')
+      throw new Error('创建滤镜输出的 Skia 画布失败')
     }
 
     let snapshot: SkImage | undefined

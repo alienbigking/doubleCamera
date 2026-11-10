@@ -56,7 +56,7 @@ addDir(commonDir, 'common')
 
 fs.mkdirSync(outDir, { recursive: true })
 fs.writeFileSync(path.join(outDir, 'svgData.ts'), lines.join('\n\n'))
-console.log('done, exports:', lines.length)
+console.log('完成，导出数量：', lines.length)
 
 // 生成固定布局
 const SIZES = [40, 48, 56, 64]
@@ -104,4 +104,4 @@ export const PRESET_LAYOUT: LayoutItem[] = ${JSON.stringify(layout, null, 2)}
 `
 
 fs.writeFileSync(path.join(outDir, 'presetLayout.ts'), layoutTs)
-console.log('done, layout items:', layout.length)
+console.log('完成，布局项数量：', layout.length)
